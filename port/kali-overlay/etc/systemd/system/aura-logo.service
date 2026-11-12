@@ -1,0 +1,10 @@
+[Unit]
+Description=Razer logo color and screen-aware rainbow animation
+After=systemd-udev-trigger.service
+ConditionPathExists=/sys/class/leds/aura:logo0/brightness
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/aura-logo --daemon
+TimeoutStopSec=3
+Restart=no

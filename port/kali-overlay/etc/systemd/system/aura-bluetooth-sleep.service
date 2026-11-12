@@ -1,0 +1,16 @@
+[Unit]
+Description=Power down Razer Bluetooth across suspend while IBS is disabled
+Before=sleep.target
+After=bluetooth.service
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/aura-bluetooth-sleep prepare
+ExecStop=/usr/local/sbin/aura-bluetooth-sleep restore
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=sleep.target

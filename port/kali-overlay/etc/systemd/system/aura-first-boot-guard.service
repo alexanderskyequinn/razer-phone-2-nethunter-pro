@@ -1,0 +1,11 @@
+[Unit]
+Description=Bounded first native Kali desktop trial
+After=local-fs.target
+Before=multi-user.target
+
+[Service]
+ExecStart=/usr/local/sbin/aura-first-boot-guard
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

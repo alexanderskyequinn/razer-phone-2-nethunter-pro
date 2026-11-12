@@ -1,0 +1,31 @@
+#!/usr/bin/python3
+"""Create device-local identity and expand only the existing ext4 root."""
+from pathlib import Path
+import os
+import secrets
+import subprocess
+import uuid
+
+root = subprocess.check_output(['findmnt','-n','-o','SOURCE','/'],text=True).strip()
+expected = Path('/dev/disk/by-partlabel/userdata').resolve(strict=True)
+assert Path(root).resolve(strict=True) == expected
+assert subprocess.check_output(['findmnt','-n','-o','FSTYPE','/'],text=True).strip() == 'ext4'
+state = Path('/var/lib/aura')
+state.mkdir(mode=0o755,parents=True,exist_ok=True)
+if not (state/'root-expanded').exists():
+    subprocess.run(['resize2fs',str(expected)],check=True)
+    (state/'root-expanded').write_text('Expanded existing userdata filesystem.\n')
+identity = Path('/etc/aura-install-id')
+if not identity.exists():
+    identity.write_text(str(uuid.uuid4())+'\n')
+address = Path('/etc/aura/bluetooth-address')
+if not address.exists():
+    address.parent.mkdir(parents=True,exist_ok=True)
+    value = bytearray(secrets.token_bytes(6))
+    value[0] = (value[0] | 2) & 254
+    address.write_text(':'.join(f'{b:02X}' for b in value)+'\n')
+    address.chmod(0o600)
+store = state/'fpc-test-store'
+store.mkdir(mode=0o700,exist_ok=True)
+os.chmod(store,0o700)
+print('Device identity and existing-root expansion ready.')

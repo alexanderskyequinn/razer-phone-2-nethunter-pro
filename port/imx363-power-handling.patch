@@ -1,0 +1,80 @@
+--- a/drivers/media/i2c/imx363.c
++++ b/drivers/media/i2c/imx363.c
+@@ -567,23 +567,6 @@
+ 			.height = IMX363_PIXEL_ARRAY_HEIGHT,
+ 		},
+ 	},
+-	{
+-		.width = 1920,
+-		.height = 1080,
+-		.vts_def = IMX363_VTS_30FPS_HD,
+-		.vts_min = IMX363_VTS_30FPS_HD,
+-		.reg_list = {
+-			.num_of_regs = ARRAY_SIZE(mode_1920_1080_regs),
+-			.regs = mode_1920_1080_regs,
+-		},
+-		.link_freq_index = IMX363_LINK_FREQ_640MBPS,
+-		.crop = {
+-			.left = IMX363_PIXEL_ARRAY_LEFT,
+-			.top = IMX363_PIXEL_ARRAY_TOP,
+-			.width = 4032,
+-			.height = 3024,
+-		},
+-	},
+ };
+ 
+ struct imx363 {
+@@ -1048,15 +1031,18 @@
+ 
+ 	usleep_range(400, 600);
+ 
+-	gpiod_set_value_cansleep(imx363->reset_gpio, 0);
+-
+ 	ret = clk_prepare_enable(imx363->clk);
+ 	if (ret) {
+ 		dev_err(dev, "failed to enable clock\n");
++		gpiod_set_value_cansleep(imx363->reset_gpio, 1);
+ 		regulator_bulk_disable(IMX363_NUM_SUPPLIES, imx363->supplies);
++		return ret;
+ 	}
+ 
+ 	usleep_range(1000, 1200);
++	gpiod_set_value_cansleep(imx363->reset_gpio, 0);
++	/* Razer's retained module sequence waits 11 ms after reset release. */
++	usleep_range(11000, 12000);
+ 
+ 	return 0;
+ }
+@@ -1116,11 +1102,18 @@
+ static int imx363_identify_module(struct imx363 *imx363)
+ {
+ 	struct i2c_client *client = v4l2_get_subdevdata(&imx363->sd);
+-	int ret;
+-	u64 val;
+-
+-	ret = cci_read(imx363->regmap, IMX363_REG_CHIP_ID,
+-		       &val, NULL);
++	int ret, attempt;
++	u64 val = 0;
++
++	/* A transient read must not permanently hide the camera for this boot. */
++	for (attempt = 0; attempt < 3; attempt++) {
++		ret = cci_read(imx363->regmap, IMX363_REG_CHIP_ID,
++			       &val, NULL);
++		if (!ret && val == IMX363_CHIP_ID)
++			return 0;
++		if (attempt < 2)
++			usleep_range(10000, 11000);
++	}
+ 	if (ret) {
+ 		dev_err(&client->dev, "failed to read chip id %x\n",
+ 			IMX363_CHIP_ID);
+@@ -1397,7 +1390,7 @@
+ 
+ 	/* request optional reset pin */
+ 	imx363->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
+-						     GPIOD_OUT_LOW);
++						     GPIOD_OUT_HIGH);
+ 	if (IS_ERR(imx363->reset_gpio))
+ 		return PTR_ERR(imx363->reset_gpio);
+ 

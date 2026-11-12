@@ -1,0 +1,12 @@
+[Unit]
+Description=Enable stock Snapdragon CPU boost
+ConditionPathExists=/sys/devices/system/cpu/cpufreq/boost
+Before=phosh.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aura-cpu-boost
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

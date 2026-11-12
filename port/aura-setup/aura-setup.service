@@ -1,0 +1,16 @@
+[Unit]
+Description=Local first-run PIN setup
+After=local-fs.target aura-initialize.service
+Before=phosh.service
+ConditionPathExists=!/var/lib/aura/setup-complete
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/aura-setup-service
+Restart=on-failure
+RuntimeDirectory=aura-setup
+UMask=0077
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target

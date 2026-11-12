@@ -1,0 +1,25 @@
+#!/usr/bin/python3
+"""Apply data preferences after ModemManager/SIM initialization settles."""
+import json
+import subprocess
+import sys
+import time
+
+ready = {'enabled', 'searching', 'registered', 'connecting', 'connected'}
+print('Waiting for modem initialization before applying data preferences.', flush=True)
+for attempt in range(30):
+    try:
+        result = subprocess.run(['mmcli', '-m', 'any', '-J'], capture_output=True, text=True, timeout=3)
+        if result.returncode == 0:
+            generic = json.loads(result.stdout)['modem']['generic']
+            state = generic['state']
+            if state in ready:
+                print('Modem initialized; applying volatile data preferences.', flush=True)
+                sys.exit(subprocess.run(['/usr/local/libexec/aura-modem-data-mode'], timeout=65).returncode)
+            if state in {'failed', 'locked'}:
+                print('SIM unavailable or locked; skipping data setup. Restart this service after SIM setup.', flush=True)
+                sys.exit(0)
+    except (subprocess.TimeoutExpired, ValueError, KeyError) as exc:
+        print(type(exc).__name__ + ' while waiting for modem readiness.', flush=True)
+    time.sleep(3)
+sys.exit('Modem did not become ready within the startup deadline.')

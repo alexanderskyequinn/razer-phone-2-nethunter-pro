@@ -1,0 +1,5 @@
+# The RC2 sensor hub exposes usable accelerometer data through libssc.
+SUBSYSTEM=="misc", KERNEL=="fastrpc-sdsp", ENV{IIO_SENSOR_PROXY_TYPE}+="ssc-accel"
+# Stock hub axes place the desktop 180 degrees from the physical screen.
+# Rotate X/Y together; retain Z so face-up/face-down detection stays correct.
+SUBSYSTEM=="misc", KERNEL=="fastrpc-sdsp", ENV{ACCEL_MOUNT_MATRIX}="-1,0,0;0,-1,0;0,0,1"

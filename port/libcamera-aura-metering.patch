@@ -1,0 +1,62 @@
+--- a/src/ipa/simple/algorithms/awb.cpp
++++ b/src/ipa/simple/algorithms/awb.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include "awb.h"
+ 
++#include <algorithm>
+ #include <numeric>
+ #include <stdint.h>
+ 
+@@ -73,16 +74,27 @@
+ 	 */
+ 	const RGB<uint64_t> sum = stats->sum_.max(offset + minValid) - offset;
+ 
++	/* Do not learn a new white point from darkness or a covered lens. */
++	if (!nPixels || sum.g() < nPixels * 2)
++		return;
++
+ 	/*
+ 	 * Calculate red and blue gains for AWB.
+ 	 * Clamp max gain at 4.0, this also avoids 0 division.
+ 	 */
+ 	auto &gains = context.activeState.awb.gains;
+-	gains = { {
++	const RGB<float> target = { {
+ 		sum.r() <= sum.g() / 4 ? 4.0f : static_cast<float>(sum.g()) / sum.r(),
+ 		1.0,
+ 		sum.b() <= sum.g() / 4 ? 4.0f : static_cast<float>(sum.g()) / sum.b(),
+ 	} };
++
++	/* AURA temporal white balance: low-pass valid statistics and bound
++	 * each update, so a new object cannot instantly tint the preview. */
++	for (unsigned int i = 0; i < 3; ++i) {
++		float next = gains[i] + 0.15f * (target[i] - gains[i]);
++		gains[i] = std::clamp(next, gains[i] * 0.9f, gains[i] * 1.1f);
++	}
+ 
+ 	RGB<double> rgbGains{ { 1 / gains.r(), 1 / gains.g(), 1 / gains.b() } };
+ 	context.activeState.awb.temperatureK = estimateCCT(rgbGains);
+--- a/src/libcamera/software_isp/debayer_egl.cpp
++++ b/src/libcamera/software_isp/debayer_egl.cpp
+@@ -339,11 +339,15 @@
+ 	window_.width = outputCfg.size.width;
+ 	window_.height = outputCfg.size.height;
+ 
+-	/*
+-	 * Don't pass x,y from window_ since process() already adjusts for it.
+-	 * But crop the window to 2/3 of its width and height for speedup.
+-	 */
+-	stats_->setWindow(Rectangle(window_.size()));
++	/* AURA input-area metering: GPU output is scaled, while CPU stats
++	 * receive the entire raw buffer with no crop-offset adjustment.
++	 * Sample the central two thirds of the input, independent of preview
++	 * size, instead of a preview-sized rectangle in the upper-left. */
++	const unsigned int meterWidth = inputCfg.size.width * 2 / 3;
++	const unsigned int meterHeight = inputCfg.size.height * 2 / 3;
++	stats_->setWindow(Rectangle((inputCfg.size.width - meterWidth) / 2,
++				    (inputCfg.size.height - meterHeight) / 2,
++				    meterWidth, meterHeight));
+ 
+ 	inputBufferCount_ = inputCfg.bufferCount;
+ 	outputBufferCount_ = outputCfg.bufferCount;

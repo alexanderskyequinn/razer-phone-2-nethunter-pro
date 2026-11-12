@@ -1,0 +1,12 @@
+[Unit]
+Description=Initialize native Kali storage and local device identity
+After=local-fs.target
+Before=phosh.service aura-setup.service aura-bluetooth-address.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/aura-initialize
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

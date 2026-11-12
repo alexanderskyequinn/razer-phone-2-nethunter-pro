@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore SSH access on the user-selected Wi-Fi network
+After=NetworkManager.service ssh.service
+Wants=NetworkManager.service
+ConditionPathExists=/etc/aura-wifi-ssh-profile
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aura-wifi-ssh
+
+[Install]
+WantedBy=multi-user.target

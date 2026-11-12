@@ -1,0 +1,28 @@
+{
+  "/soc/i2c@a98000/synaptics_dsx@20": {
+    "compatible": "73796e6170746963732c6473782d69326300",
+    "reg": "00000020",
+    "interrupt-parent": "00000034",
+    "interrupts": "0000001f00002008",
+    "vdd-supply": "00000342",
+    "synaptics,power-gpio": "000000340000002c00000000",
+    "synaptics,pwr-reg-name": "76646400",
+    "synaptics,power-on-state": "00000001",
+    "synaptics,display-coords": "00000000000000000000063f000009ff",
+    "synaptics,panel-coords": "00000000000000000000063f00000a8f",
+    "synaptics,irq-gpio": "000000340000001f00002008",
+    "synaptics,reset-gpio": "000000340000002000000000",
+    "synaptics,reset-delay-ms": "00000064",
+    "synaptics,reset-on-state": "00000000",
+    "synaptics,reset-active-ms": "00000014"
+  },
+  "/soc/rpmh-regulator-ldoa28/regulator-l28": {
+    "regulator-name": "706d383939385f6c323800",
+    "qcom,set": "00000003",
+    "regulator-min-microvolt": "002b9440",
+    "regulator-max-microvolt": "002de600",
+    "qcom,init-voltage": "002b9440",
+    "qcom,init-mode": "00000002",
+    "phandle": "00000342"
+  }
+}

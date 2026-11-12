@@ -1,0 +1,11 @@
+[Unit]
+Description=DHCP for the Razer USB development link
+Requires=aura-usb-gadget.service
+After=aura-usb-gadget.service
+
+[Service]
+ExecStart=/usr/local/libexec/busybox udhcpd -f /run/aura-udhcpd.conf
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

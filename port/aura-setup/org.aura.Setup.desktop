@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome to Kali
+Exec=/usr/local/bin/aura-setup-app
+Icon=preferences-system
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-Purism-FormFactor=Workstation;Mobile;

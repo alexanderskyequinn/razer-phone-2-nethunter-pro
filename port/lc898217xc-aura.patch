@@ -1,0 +1,88 @@
+--- a/drivers/media/i2c/lc898217xc.c
++++ b/drivers/media/i2c/lc898217xc.c
+@@ -4,6 +4,7 @@
+ #include <linux/delay.h>
+ #include <linux/i2c.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
+@@ -32,6 +33,7 @@
+ 	struct v4l2_ctrl_handler ctrls;
+ 	struct v4l2_subdev sd;
+ 	struct regmap *regmap;
++	bool aura;
+ };
+ 
+ static inline struct lc898217xc *sd_to_lc898217xc(struct v4l2_subdev *subdev)
+@@ -59,7 +61,27 @@
+ 		return ret;
+ 
+ 	usleep_range(8000, 10000);
+-	return 0;
++    if (lc898217xc->aura) {
++        u64 value;
++        int tries;
++        ret = cci_read(lc898217xc->regmap, CCI_REG8(0xf0), &value, NULL);
++        if (ret) goto power_error;
++        if (value != 0x72) { ret = -ENODEV; goto power_error; }
++        ret = cci_write(lc898217xc->regmap, CCI_REG8(0xe0), 1, NULL);
++        if (ret) goto power_error;
++        for (tries = 0; tries < 100; ++tries) {
++            ret = cci_read(lc898217xc->regmap, CCI_REG8(0xe3), &value, NULL);
++            if (ret) goto power_error;
++            if (value == 0) return 0;
++            usleep_range(1000, 1500);
++        }
++        ret = -ETIMEDOUT;
++        goto power_error;
++    }
++    return 0;
++power_error:
++    regulator_bulk_disable(ARRAY_SIZE(lc898217xc_supply_names), lc898217xc->supplies);
++    return ret;
+ }
+ 
+ static int lc898217xc_power_off(struct lc898217xc *lc898217xc) {
+@@ -89,8 +111,8 @@
+ 		return ret;
+ 	}
+ 
+-	__v4l2_ctrl_handler_setup(&lc898217xc->ctrls);
+-
++	ret = __v4l2_ctrl_handler_setup(&lc898217xc->ctrls);
++	if (ret) lc898217xc_power_off(lc898217xc);
+ 	return ret;
+ }
+ 
+@@ -142,9 +164,9 @@
+ 	v4l2_ctrl_handler_init(hdl, 1);
+ 
+ 	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_FOCUS_ABSOLUTE,
+-		          LC898217XC_MIN_FOCUS_POS,
+-			  LC898217XC_MAX_FOCUS_POS,
+-			  LC898217XC_FOCUS_STEPS, 0);
++		          (lc898217xc->aura ? 60 : LC898217XC_MIN_FOCUS_POS),
++			  (lc898217xc->aura ? 610 : LC898217XC_MAX_FOCUS_POS),
++			  LC898217XC_FOCUS_STEPS, lc898217xc->aura ? 60 : 0);
+ 
+ 	if (hdl->error)
+ 		return hdl->error;
+@@ -169,6 +191,8 @@
+ 	if (IS_ERR(lc898217xc->regmap))
+ 		return dev_err_probe(dev, PTR_ERR(lc898217xc->regmap),
+ 				     "failed to initialize CCI\n");
++
++	lc898217xc->aura = of_device_is_compatible(dev->of_node, "razer,aura-lc898217xc");
+ 
+ 	/* Initialize subdev */
+ 	v4l2_i2c_subdev_init(&lc898217xc->sd, client, &lc898217xc_ops);
+@@ -263,6 +287,7 @@
+ }
+ 
+ static const struct of_device_id lc898217xc_of_table[] = {
++	{ .compatible = "razer,aura-lc898217xc" },
+ 	{ .compatible = "onnn,lc898217xc" },
+ 	{ /* sentinel */ }
+ };

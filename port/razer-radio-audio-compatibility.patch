@@ -1,0 +1,111 @@
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1990,7 +1990,9 @@
+ 	ret = qca_uart_setup(hdev, qca_baudrate, soc_type, ver,
+ 			firmware_name, rampatch_name);
+ 	if (!ret) {
+-		clear_bit(QCA_IBS_DISABLED, &qca->flags);
++		/* Temporary RC2 diagnostic: keep host and controller sleep disabled. */
++		if (!of_machine_is_compatible("razer,aura"))
++			clear_bit(QCA_IBS_DISABLED, &qca->flags);
+ 		qca_debugfs_init(hdev);
+ 		hu->hdev->hw_error = qca_hw_error;
+ 		hu->hdev->reset = qca_reset;
+--- a/drivers/bluetooth/btqca.c
++++ b/drivers/bluetooth/btqca.c
+@@ -5,6 +5,7 @@
+  *  Copyright (c) 2015 The Linux Foundation. All rights reserved.
+  */
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/firmware.h>
+ #include <linux/vmalloc.h>
+ 
+@@ -440,7 +441,11 @@
+ 				 * enabling software inband sleep
+ 				 * onto controller side.
+ 				 */
+-				tlv_nvm->data[0] |= 0x80;
++				/* Temporary RC2 sleep-handshake diagnostic. */
++				if (of_machine_is_compatible("razer,aura"))
++					tlv_nvm->data[0] &= ~0x80;
++				else
++					tlv_nvm->data[0] |= 0x80;
+ 
+ 				/* UART Baud Rate */
+ 				if (soc_type >= QCA_WCN3991)
+@@ -457,7 +462,11 @@
+ 				/* Sleep enable mask
+ 				 * enabling deep sleep feature on controller.
+ 				 */
+-				tlv_nvm->data[0] |= 0x01;
++				/* Temporary RC2 sleep-handshake diagnostic. */
++				if (of_machine_is_compatible("razer,aura"))
++					tlv_nvm->data[0] &= ~0x01;
++				else
++					tlv_nvm->data[0] |= 0x01;
+ 
+ 				break;
+ 			}
+--- a/sound/soc/qcom/sdm845.c
++++ b/sound/soc/qcom/sdm845.c
+@@ -5,6 +5,7 @@
+ 
+ #include <dt-bindings/sound/qcom,q6afe.h>
+ #include <linux/module.h>
++#include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+@@ -373,12 +374,18 @@
+ 		snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
+ 		break;
+ 	case QUATERNARY_MI2S_RX:
++		if (of_machine_is_compatible("razer,aura"))
++			snd_soc_dai_set_sysclk(cpu_dai,
++				Q6AFE_LPASS_CLK_ID_QUAD_MI2S_IBIT, 0,
++				SNDRV_PCM_STREAM_PLAYBACK);
+ 		codec_dai_fmt |= SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_I2S;
+ 		snd_soc_dai_set_sysclk(cpu_dai,
+ 			Q6AFE_LPASS_CLK_ID_QUAD_MI2S_IBIT,
+-			MI2S_BCLK_RATE, SNDRV_PCM_STREAM_PLAYBACK);
++			of_machine_is_compatible("razer,aura") ? 3072000 : MI2S_BCLK_RATE,
++			SNDRV_PCM_STREAM_PLAYBACK);
+ 		snd_soc_dai_set_fmt(cpu_dai, fmt);
+-		snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
++		for_each_rtd_codec_dais(rtd, j, codec_dai)
++			snd_soc_dai_set_fmt(codec_dai, codec_dai_fmt);
+ 		break;
+ 
+ 	case QUATERNARY_TDM_RX_0:
+@@ -486,8 +493,13 @@
+ 				0, SNDRV_PCM_STREAM_PLAYBACK);
+ 		}
+ 		break;
++	case QUATERNARY_MI2S_RX:
++		if (of_machine_is_compatible("razer,aura"))
++			snd_soc_dai_set_sysclk(cpu_dai,
++				Q6AFE_LPASS_CLK_ID_QUAD_MI2S_IBIT, 0,
++				SNDRV_PCM_STREAM_PLAYBACK);
++		break;
+ 	case SLIMBUS_0_RX...SLIMBUS_6_TX:
+-	case QUATERNARY_MI2S_RX:
+ 		break;
+ 
+ 	default:
+@@ -573,7 +585,14 @@
+ 
+ 	rate->min = rate->max = DEFAULT_SAMPLE_RATE_48K;
+ 	channels->min = channels->max = 2;
+-	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
++	if (of_machine_is_compatible("razer,aura") &&
++	    snd_soc_rtd_to_cpu(rtd, 0)->id == QUATERNARY_MI2S_RX) {
++		/* RC2 stock TFA9912 profiles use 24-bit samples in 32-bit slots. */
++		snd_mask_none(fmt);
++		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S24_LE);
++	} else {
++		snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
++	}
+ 
+ 	return 0;
+ }

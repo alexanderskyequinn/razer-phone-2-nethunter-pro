@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-2.0
+/* RC2 stock wiring, using the generic NXP NCI interface. Tag test pending. */
+&i2c3 {
+	status = "okay";
+	clock-frequency = <400000>;
+	nfc@28 {
+		compatible = "nxp,nxp-nci-i2c";
+		reg = <0x28>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <63 IRQ_TYPE_LEVEL_HIGH>;
+		enable-gpios = <&tlmm 12 GPIO_ACTIVE_HIGH>;
+		firmware-gpios = <&tlmm 62 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aura_nfc_irq &aura_nfc_enable &aura_nfc_clkreq>;
+	};
+};
+&tlmm {
+	aura_nfc_irq: nfc-irq-state {
+		pins = "gpio63";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+		input-enable;
+	};
+	aura_nfc_enable: nfc-enable-state {
+		pins = "gpio12", "gpio62";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+};
+&pm8998_gpios {
+	aura_nfc_clkreq: nfc-clock-request-state {
+		pins = "gpio21";
+		function = "normal";
+		input-enable;
+		power-source = <1>;
+	};
+};

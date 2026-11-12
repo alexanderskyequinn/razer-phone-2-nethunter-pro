@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Retained actuator1: CCI1 address0x72, BOB supply gated by TLMM99. */
+/ {
+    aura_tele_vaf: regulator-tele-focus {
+        compatible = "regulator-fixed";
+        regulator-name = "aura-tele-focus";
+        vin-supply = <&vreg_bob>;
+        gpio = <&tlmm 99 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_tele_focus_enable>;
+        startup-delay-us = <8000>;
+    };
+};
+&tlmm {
+    aura_tele_focus_enable: tele-focus-enable-state {
+        pins = "gpio99"; function = "gpio"; drive-strength = <2>; bias-disable;
+    };
+};
+&cci_i2c1 {
+    aura_lc898217: lens@72 {
+        compatible = "razer,aura-lc898217xc", "onnn,lc898217xc";
+        reg = <0x72>;
+        vana-supply = <&aura_tele_vaf>;
+        vdd-supply = <&aura_tele_io>;
+    };
+    camera-probe@1a { lens-focus = <&aura_lc898217>; };
+};

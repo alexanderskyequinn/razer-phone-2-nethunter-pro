@@ -1,0 +1,20 @@
+[Unit]
+Description=Private storage listener for Aura fingerprint tests
+Conflicts=aura-qsee-supplicant-test.service
+After=aura-qsee-supplicant-test.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/local/libexec/aura-qsee-rpmb-authenticated --state-dir /var/lib/aura/fpc-test-store
+TimeoutStartSec=25
+Restart=no
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aura/fpc-test-store
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_RAWIO
+LimitCORE=0

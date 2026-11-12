@@ -1,0 +1,3 @@
+# Razer Phone 2: keep internal firmware/OS volumes out of desktop mount lists.
+# Match the onboard UFS controller, never removable USB or microSD storage.
+SUBSYSTEM=="block", KERNELS=="1d84000.ufshc", ENV{UDISKS_IGNORE}="1", ENV{UDISKS_AUTO}="0"

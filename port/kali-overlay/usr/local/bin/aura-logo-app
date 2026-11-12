@@ -1,0 +1,93 @@
+#!/usr/bin/python3
+"""Touch-friendly controls for the Razer rear logo."""
+import subprocess
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, GLib
+
+class LogoApp(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id='org.aura.LogoLight')
+        self.window = None
+        self.child = None
+
+    def do_activate(self):
+        if self.window:
+            self.window.present()
+            return
+        self.window = Gtk.ApplicationWindow(application=self, title='Logo Light')
+        self.window.set_default_size(360, 460)
+        header = Gtk.HeaderBar(title='Logo Light', show_close_button=True)
+        self.window.set_titlebar(header)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        box.set_border_width(20)
+        self.window.add(box)
+        title = Gtk.Label()
+        title.set_markup('<span size="x-large" weight="bold">Color your logo</span>')
+        box.pack_start(title, False, False, 2)
+        description = Gtk.Label(label='The light turns off with the screen\nand resumes when you wake it.')
+        description.set_line_wrap(True)
+        description.set_justify(Gtk.Justification.CENTER)
+        box.pack_start(description, False, False, 0)
+        self.buttons = []
+        rainbow = self.button('Rainbow', 'rainbow')
+        rainbow.get_style_context().add_class('suggested-action')
+        box.pack_start(rainbow, False, False, 0)
+        grid = Gtk.Grid(column_spacing=10, row_spacing=10)
+        for i, color in enumerate(('red', 'green', 'blue', 'white')):
+            grid.attach(self.button(color.capitalize(), color), i % 2, i // 2, 1, 1)
+        box.pack_start(grid, False, False, 0)
+        box.pack_start(self.button('Turn off', 'off'), False, False, 0)
+        self.status = Gtk.Label(label='Choose a color or a smooth rainbow cycle.')
+        self.status.set_line_wrap(True)
+        self.status.set_max_width_chars(34)
+        self.status.set_justify(Gtk.Justification.CENTER)
+        box.pack_start(self.status, True, True, 0)
+        self.window.show_all()
+        self.window.present()
+
+    def button(self, label, color):
+        button = Gtk.Button(label=label)
+        button.set_size_request(-1, 52)
+        button.set_hexpand(True)
+        button.connect('clicked', self.choose, color)
+        self.buttons.append(button)
+        return button
+
+    def choose(self, button, color):
+        if self.child:
+            return
+        for item in self.buttons:
+            item.set_sensitive(False)
+        self.status.set_text('Applying… Confirm the password prompt if it appears.')
+        try:
+            self.child = subprocess.Popen(
+                ['/usr/bin/pkexec', '/usr/local/sbin/aura-logo', color],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except OSError as error:
+            self.complete(str(error))
+            return
+        GLib.timeout_add(100, self.check, color)
+
+    def check(self, color):
+        if self.child.poll() is None:
+            return True
+        output, error = self.child.communicate()
+        result = self.child.returncode
+        self.child = None
+        if result == 0:
+            self.complete('Logo is off.' if color == 'off' else
+                          f'{color.capitalize()} selected. It pauses while the screen is off.')
+        elif result in (126, 127):
+            self.complete('Change not applied. Try again and confirm the password prompt.')
+        else:
+            self.complete(error.strip() or output.strip() or 'Unable to change the logo.')
+        return False
+
+    def complete(self, message):
+        self.child = None
+        self.status.set_text(message)
+        for item in self.buttons:
+            item.set_sensitive(True)
+
+LogoApp().run(None)

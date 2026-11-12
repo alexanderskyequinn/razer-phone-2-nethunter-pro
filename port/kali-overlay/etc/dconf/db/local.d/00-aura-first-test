@@ -1,0 +1,6 @@
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-battery-type='nothing'
+sleep-inactive-ac-type='nothing'
+
+[org/gnome/desktop/session]
+idle-delay=uint32 0

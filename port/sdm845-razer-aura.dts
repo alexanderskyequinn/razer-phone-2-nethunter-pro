@@ -1,0 +1,408 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Razer Phone 2 (FIH RC2), experimental native Linux bring-up.
+ * Board IDs, USB rails and FIH memory reservations are from the captured
+ * P-SMR6-RC001-RZR-201022 live tree. Shared SoC nodes use sdm845.dtsi.
+ * Wireless bring-up uses stock firmware; charging uses conservative limits.
+ */
+/dts-v1/;
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include "sdm845.dtsi"
+#include "pm8998.dtsi"
+#include "pmi8998.dtsi"
+#include "sdm845-razer-aura-audio.dtsi"
+#include "sdm845-razer-aura-peripherals.dtsi"
+#include "sdm845-razer-aura-nfc.dtsi"
+#include "sdm845-razer-aura-logo.dtsi"
+#include "sdm845-razer-aura-wireless.dtsi"
+#include "sdm845-razer-aura-torch.dtsi"
+#include "sdm845-razer-aura-camera.dtsi"
+
+/* Original-kernel UIO probe measured the usable buffer at 0xf5a01000. */
+&rmtfs_mem {
+	reg = <0 0xf5a00000 0 0x202000>;
+	qcom,use-guard-pages;
+};
+
+/ {
+	model = "Razer Phone 2 (aura) - experimental native Linux";
+	compatible = "razer,aura", "qcom,sdm845";
+	chassis-type = "handset";
+	qcom,msm-id = <321 0x20000>;
+	qcom,board-id = <8 0>;
+	fih,hw-id = <2 4 0>;
+
+	aliases { serial0 = &uart9; };
+	chosen { stdout-path = "serial0:115200n8"; };
+	battery: battery {
+		compatible = "simple-battery";
+		/* Captured FIH 3413486 battery profile: 4000 mAh, 3.3..4.4 V. */
+		charge-full-design-microamp-hours = <4000000>;
+		voltage-min-design-microvolt = <3300000>;
+		voltage-max-design-microvolt = <4400000>;
+		/* Initial charging trial: below the captured 4.4 V / 3.9 A limits. */
+		constant-charge-voltage-max-microvolt = <4200000>;
+		constant-charge-current-max-microamp = <900000>;
+	};
+
+	reserved-memory {
+		fih_nv_mem: fih-nv@af000000 {
+			reg = <0 0xaf000000 0 0x800000>;
+			no-map;
+		};
+		ramoops@af800000 {
+			compatible = "ramoops";
+			reg = <0 0xaf800000 0 0x200000>;
+			record-size = <0x40000>;
+			console-size = <0x40000>;
+			ftrace-size = <0x40000>;
+			pmsg-size = <0x80000>;
+		};
+		fih_mem: fih@afa00000 {
+			reg = <0 0xafa00000 0 0x600000>;
+			no-map;
+		};
+	};
+
+	vph_pwr: regulator-vph-pwr {
+		compatible = "regulator-fixed";
+		regulator-name = "vph_pwr";
+		regulator-min-microvolt = <3700000>;
+		regulator-max-microvolt = <3700000>;
+	};
+	/* Downstream exposes this firmware-managed supply as a stub regulator. */
+	vreg_s4a: regulator-pm8998-s4 {
+		compatible = "regulator-fixed";
+		regulator-name = "pm8998_s4";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+	ts_1p8: regulator-touch-1p8 {
+		compatible = "regulator-fixed";
+		regulator-name = "touch_1p8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&tlmm 44 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <200000>;
+	};
+};
+
+&apps_rsc {
+	regulators-0 {
+		compatible = "qcom,pm8998-rpmh-regulators";
+		qcom,pmic-id = "a";
+		vdd-s3-supply = <&vph_pwr>;
+		vdd-s5-supply = <&vph_pwr>;
+		vdd-s7-supply = <&vph_pwr>;
+		vdd-l1-l27-supply = <&vreg_s7a>;
+		vdd-l2-l8-l17-supply = <&vreg_s3a>;
+		vdd-l26-supply = <&vreg_s3a>;
+		vdd-l6-supply = <&vph_pwr>;
+		vdd-l16-l28-supply = <&vreg_bob>;
+		vdd-l7-l12-l14-l15-supply = <&vreg_s5a>;
+		vdd-l20-l24-supply = <&vreg_bob>;
+		vdd-l5-supply = <&vreg_s7a>;
+		vdd-l23-l25-supply = <&vreg_bob>;
+
+		vreg_s3a: smps3 {
+			regulator-min-microvolt = <1352000>;
+			regulator-max-microvolt = <1352000>;
+		};
+		vreg_s5a: smps5 {
+			regulator-min-microvolt = <1904000>;
+			regulator-max-microvolt = <2040000>;
+		};
+		vreg_s7a: smps7 {
+			regulator-min-microvolt = <900000>;
+			regulator-max-microvolt = <1028000>;
+		};
+		vreg_l1a: ldo1 {
+			regulator-min-microvolt = <880000>;
+			regulator-max-microvolt = <880000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		/* UFS reference-clock supply, always on in the captured Razer tree. */
+		vreg_l2a: ldo2 {
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
+		};
+		vreg_l6a: ldo6 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l5a: ldo5 {
+			regulator-min-microvolt = <800000>;
+			regulator-max-microvolt = <800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l7a: ldo7 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l17a: ldo17 {
+			regulator-min-microvolt = <1304000>;
+			regulator-max-microvolt = <1304000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l25a: ldo25 {
+			regulator-min-microvolt = <3104000>;
+			regulator-max-microvolt = <3312000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l14a: ldo14 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l12a: ldo12 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l20a: ldo20 {
+			regulator-min-microvolt = <2950000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l26a: ldo26 {
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l28a: ldo28 {
+			regulator-min-microvolt = <2856000>;
+			regulator-max-microvolt = <3008000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l24a: ldo24 {
+			regulator-min-microvolt = <3088000>;
+			regulator-max-microvolt = <3088000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+	regulators-1 {
+		compatible = "qcom,pmi8998-rpmh-regulators";
+		qcom,pmic-id = "b";
+		vdd-bob-supply = <&vph_pwr>;
+		vreg_bob: bob {
+			regulator-min-microvolt = <3312000>;
+			regulator-max-microvolt = <3600000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
+			regulator-allow-bypass;
+		};
+	};
+};
+
+&gcc {
+	protected-clocks = <GCC_QSPI_CORE_CLK>, <GCC_QSPI_CORE_CLK_SRC>,
+		<GCC_QSPI_CNOC_PERIPH_AHB_CLK>, <GCC_LPASS_Q6_AXI_CLK>,
+		<GCC_LPASS_SWAY_CLK>;
+};
+
+&pm8998_resin { linux,code = <KEY_VOLUMEUP>; status = "okay"; };
+/* Keep the existing factory fuel-gauge profile. */
+&pmi8998_fg {
+	status = "okay";
+	monitored-battery = <&battery>;
+	power-supplies = <&pmi8998_charger>;
+};
+&pmi8998_charger { status = "okay"; monitored-battery = <&battery>; };
+&qupv3_id_1 { status = "okay"; };
+&qupv3_id_0 { status = "okay"; };
+&uart9 { status = "okay"; };
+&qup_uart9_rx { drive-strength = <2>; bias-pull-up; };
+&qup_uart9_tx { drive-strength = <2>; bias-disable; };
+
+&uart6 {
+	status = "okay";
+	pinctrl-0 = <&qup_uart6_4pin>;
+	bluetooth {
+		compatible = "qcom,wcn3990-bt";
+		firmware-name = "razer/aura/crnv21.bin";
+		vddio-supply = <&vreg_s3a>;
+		vddxo-supply = <&vreg_l7a>;
+		vddrf-supply = <&vreg_l17a>;
+		vddch0-supply = <&vreg_l25a>;
+		max-speed = <3200000>;
+	};
+};
+
+&mss_pil {
+	status = "okay";
+	firmware-name = "qcom/sdm845/razer/aura/mba.mbn", "qcom/sdm845/razer/aura/modem.mdt";
+};
+
+&wifi {
+	status = "okay";
+	vdd-0.8-cx-mx-supply = <&vreg_l5a>;
+	vdd-1.8-xo-supply = <&vreg_l7a>;
+	vdd-1.3-rfa-supply = <&vreg_l17a>;
+	vdd-3.3-ch0-supply = <&vreg_l25a>;
+	qcom,snoc-host-cap-8bit-quirk;
+	qcom,calibration-variant = "razer_aura";
+};
+&tlmm {
+	gpio-reserved-ranges = <0 4>, <81 4>;
+	display_te: display-te-state {
+		pins = "gpio10";
+		function = "mdp_vsync";
+		drive-strength = <2>;
+		bias-pull-down;
+		input-enable;
+	};
+	ts_irq: touch-irq-state {
+		pins = "gpio31";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+		input-enable;
+	};
+	ts_reset: touch-reset-state {
+		pins = "gpio32";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+		output-high;
+	};
+};
+
+&i2c14 {
+	status = "okay";
+	clock-frequency = <400000>;
+	touchscreen@20 {
+		compatible = "syna,rmi4-i2c";
+		reg = <0x20>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		interrupts-extended = <&tlmm 31 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_irq &ts_reset>;
+		vdd-supply = <&vreg_l28a>;
+		vio-supply = <&ts_1p8>;
+		syna,startup-delay-ms = <200>;
+		syna,reset-delay-ms = <100>;
+		rmi4-f12@12 {
+			reg = <0x12>;
+			syna,sensor-type = <1>;
+		};
+	};
+};
+
+/* UFS contains the persistent native Kali filesystem on userdata. */
+&ufs_mem_hc {
+	status = "okay";
+	reset-gpios = <&tlmm 150 GPIO_ACTIVE_LOW>;
+	vcc-supply = <&vreg_l20a>;
+	vcc-max-microamp = <600000>;
+	vccq2-supply = <&vreg_s4a>;
+	vccq2-max-microamp = <600000>;
+};
+&ufs_mem_phy {
+	status = "okay";
+	vdda-phy-supply = <&vreg_l1a>;
+	vdda-pll-supply = <&vreg_l26a>;
+};
+
+/* USB2 device mode avoids depending on the unported TUSB544 SS/DP switch. */
+&usb_1 {
+	status = "okay";
+	/* USB2-only bring-up has no SSPHY providing the PIPE clock. */
+	qcom,select-utmi-as-pipe-clk;
+};
+&usb_1_dwc3 {
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	phys = <&usb_1_hsphy>;
+	phy-names = "usb2-phy";
+};
+&usb_1_dwc3_ss { /delete-property/ remote-endpoint; };
+&usb_1_qmpphy_usb_ss_in { /delete-property/ remote-endpoint; };
+&usb_1_hsphy {
+	status = "okay";
+	vdd-supply = <&vreg_l1a>;
+	vdda-pll-supply = <&vreg_l12a>;
+	vdda-phy-dpdm-supply = <&vreg_l24a>;
+};
+
+/* Device-signed firmware captured from this phone's stock installation. */
+&gpu {
+	status = "okay";
+	zap-shader {
+		memory-region = <&gpu_mem>;
+		firmware-name = "qcom/sdm845/razer/aura/a630_zap.mdt";
+	};
+};
+&gmu { status = "okay"; };
+&mdss { status = "okay"; };
+&mdss_mdp {
+	pinctrl-names = "default";
+	pinctrl-0 = <&display_te>;
+};
+&lab {
+	regulator-min-microvolt = <5800000>;
+	regulator-max-microvolt = <5800000>;
+};
+&ibb {
+	regulator-min-microvolt = <5800000>;
+	regulator-max-microvolt = <5800000>;
+};
+&pmi8998_wled {
+	status = "okay";
+	label = "panel-backlight";
+	default-brightness = <256>;
+	qcom,current-limit-microamp = <20000>;
+	qcom,current-boost-limit = <970>;
+	qcom,switching-freq = <1600>;
+	qcom,ovp-millivolt = <29600>;
+	qcom,enabled-strings = <0 1 2 3>;
+	qcom,cabc;
+	qcom,auto-string-detection;
+};
+&mdss_dsi0 {
+	status = "okay";
+	vdda-supply = <&vreg_l26a>;
+	qcom,dual-dsi-mode;
+	qcom,master-dsi;
+	qcom,sync-dual-dsi;
+	panel@0 {
+		compatible = "razer,aura-nt36830";
+		reg = <0>;
+		vddio-supply = <&vreg_l14a>;
+		exclk-supply = <&vreg_l6a>;
+		ibb-supply = <&ibb>;
+		lab-supply = <&lab>;
+		backlight = <&pmi8998_wled>;
+		reset-gpios = <&tlmm 6 GPIO_ACTIVE_LOW>;
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			port@0 {
+				reg = <0>;
+				aura_panel_in0: endpoint { remote-endpoint = <&mdss_dsi0_out>; };
+			};
+			port@1 {
+				reg = <1>;
+				aura_panel_in1: endpoint { remote-endpoint = <&mdss_dsi1_out>; };
+			};
+		};
+	};
+};
+&mdss_dsi1 {
+	status = "okay";
+	vdda-supply = <&vreg_l26a>;
+	qcom,dual-dsi-mode;
+	qcom,sync-dual-dsi;
+	assigned-clock-parents = <&mdss_dsi0_phy DSI_BYTE_PLL_CLK>,
+				 <&mdss_dsi0_phy DSI_PIXEL_PLL_CLK>;
+};
+&mdss_dsi0_out { remote-endpoint = <&aura_panel_in0>; data-lanes = <0 1 2 3>; };
+&mdss_dsi1_out { remote-endpoint = <&aura_panel_in1>; data-lanes = <0 1 2 3>; };
+&mdss_dsi0_phy { status = "okay"; vdds-supply = <&vreg_l1a>; };
+&mdss_dsi1_phy { status = "okay"; vdds-supply = <&vreg_l1a>; };

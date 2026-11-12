@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* RC2 main rear IMX363: stock CCI0/CSI0, MCLK0, reset80, PMIC enables10/11/12. */
+/ {
+	aura_cam_vaf: regulator-camera-focus {
+		compatible = "regulator-fixed";
+		regulator-name = "aura-camera-focus";
+		vin-supply = <&vreg_bob>;
+		gpio = <&pm8998_gpios 16 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aura_cam_focus_enable>;
+		startup-delay-us = <1000>;
+	};
+	aura_cam_vif: regulator-camera-io {
+		compatible = "regulator-fixed";
+		regulator-name = "aura-camera-io";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&aura_camera_lvs1>;
+		gpio = <&pm8998_gpios 11 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aura_cam_io_enable>;
+		startup-delay-us = <1000>;
+	};
+	aura_cam_vana: regulator-camera-analog {
+		compatible = "regulator-fixed";
+		regulator-name = "aura-camera-analog";
+		/* Stock BOB upstream voltage; GPIO12 controls the downstream rail. */
+		vin-supply = <&vreg_bob>;
+		gpio = <&pm8998_gpios 12 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aura_cam_analog_enable>;
+		startup-delay-us = <1000>;
+	};
+	aura_cam_vdig: regulator-camera-digital {
+		compatible = "regulator-fixed";
+		regulator-name = "aura-camera-digital";
+		vin-supply = <&vreg_s3a>;
+		gpio = <&pm8998_gpios 10 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aura_cam_digital_enable>;
+		startup-delay-us = <1000>;
+	};
+};
+&pm8998_gpios {
+	aura_cam_focus_enable: camera-focus-enable-state {
+		pins = "gpio16"; function = "normal"; power-source = <0>; bias-disable;
+	};
+	aura_cam_io_enable: camera-io-enable-state {
+		pins = "gpio11"; function = "normal"; power-source = <0>; bias-disable;
+	};
+	aura_cam_analog_enable: camera-analog-enable-state {
+		pins = "gpio12"; function = "normal"; power-source = <0>; bias-disable;
+	};
+	aura_cam_digital_enable: camera-digital-enable-state {
+		pins = "gpio10"; function = "normal"; power-source = <0>; bias-disable;
+	};
+};
+&tlmm {
+	aura_cam_mclk: camera-mclk-state {
+		pins = "gpio13"; function = "cam_mclk"; drive-strength = <2>; bias-disable;
+	};
+	aura_cam_reset: camera-reset-state {
+		pins = "gpio80"; function = "gpio"; drive-strength = <2>; bias-disable;
+	};
+};
+&cci_i2c0 {
+	aura_bu64753: lens@76 {
+		compatible = "rohm,bu64753";
+		reg = <0x76>;
+		vcc-supply = <&aura_cam_vaf>;
+		vio-supply = <&aura_cam_vif>;
+	};
+	camera@10 {
+		lens-focus = <&aura_bu64753>;
+		compatible = "sony,imx363";
+		reg = <0x10>;
+		reset-gpios = <&tlmm 80 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aura_cam_mclk &aura_cam_reset>;
+		clocks = <&clock_camcc CAM_CC_MCLK0_CLK>;
+		clock-names = "xvclk";
+		clock-frequency = <24000000>;
+		vif-supply = <&aura_cam_vif>;
+		vana-supply = <&aura_cam_vana>;
+		vdig-supply = <&aura_cam_vdig>;
+		orientation = <1>;
+		rotation = <90>;
+		port {
+			aura_imx363_ep: endpoint {
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <636000000>;
+				remote-endpoint = <&aura_csiphy0_ep>;
+			};
+		};
+	};
+};
+&camss {
+	vdda-phy-supply = <&vreg_l1a>;
+	vdda-pll-supply = <&vreg_l26a>;
+	vdda-csi0-supply = <&vreg_l1a>;
+	vdda-csi1-supply = <&vreg_l1a>;
+	vdda-csi2-supply = <&vreg_l1a>;
+	status = "okay";
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			aura_csiphy0_ep: endpoint {
+				clock-lanes = <7>;
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&aura_imx363_ep>;
+			};
+		};
+	};
+};

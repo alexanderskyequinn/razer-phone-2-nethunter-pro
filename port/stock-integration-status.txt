@@ -1,0 +1,170 @@
+Stock software integration -- 2026-10-09
+
+Policy: prefer distribution/upstream applications, settings and authentication.
+Keep device-specific work in hardware drivers and necessary integration.
+
+First-run setup candidate
+  Phosh First Boot 0.2.0, unmodified behavior, upstream commit
+  9c69b23ff4029d48efd6dcd0b9d6287dbc12d9d8.
+  Packaged Phrog login manager and systemd-homed account management.
+  Upstream LUKS home default retained; the user's PIN is needed to open the
+  encrypted home at initial login. Fingerprint matching alone cannot supply
+  the disk-encryption key.
+  No preset account, password, fingerprint, Wi-Fi profile or remote-login key.
+  Custom prototype setup screen/service is excluded from the candidate.
+  Aura-specific initialization expands the existing userdata filesystem and
+  creates fresh device-local identities. No repartitioning is performed.
+  Runtime dependencies and personal-state audit passed in an ARM64 chroot.
+  Full first-boot, account creation, login, keyboard and reboot acceptance are
+  still required on the phone. The current phone installation is unchanged.
+
+Build order in the isolated WSL environment
+  build_phosh_first_boot.py
+  install_release_packages.py --onboarding-runtime (private mount namespace)
+  prepare_kali_release.py (also configures upstream onboarding)
+  audit_kali_release.py
+  build_kali_release.py
+  Inputs and development build dependencies are local; this is not yet a
+  standalone reproducible public build recipe. Firmware distribution review
+  and a validated installer are outstanding.
+
+Fingerprint integration
+  Target: libfprint hardware backend -> fprintd -> standard Settings / PAM.
+  Existing custom backend has passed one real same-finger acceptance and
+  different-finger rejection pair. The isolated libfprint prototype now
+  discovers the real sensor but does not implement biometric operations;
+  desktop fingerprint unlock remains disabled. The platform discovery patch
+  and secure biometric backend still need integration and upstream review.
+  The current engineering backend assumes one test database and group 1000;
+  it must gain proper per-account ownership, multiple finger identifiers,
+  enumeration/deletion, cancellation and reliable error reporting.
+  Secure enrollment currently obtains a Gatekeeper token using a setup PIN.
+  Standard fprintd does not forward a plaintext account PIN to a driver. That
+  authorization boundary needs an explicit design, not a UI wrapper or fake
+  virtual sensor. Do not store an account PIN to bridge this gap.
+  Verify enrollment/reload, right/wrong finger, no sensor, cancellation,
+  deletion, restart, failed authorization and PIN fallback before enabling
+  fingerprint authentication. Do not change the existing phone enrollment.
+
+Recovery
+  Default future builds are local-only and contain no operator SSH key.
+  The existing phone still has the previously tested development recovery;
+  the key-free candidate has not been installed or hardware-tested yet.
+
+Checked follow-up -- 2026-10-09
+  Native libfprint platform discovery now recognizes the actual Razer device
+  in an isolated phone-side test. Eight mocked discovery/rejection cases pass.
+  Available upstream tests: three passed, zero failed, 35 skipped.
+  Driver advertises no usable biometric operations and refuses open until
+  secure account authorization/storage are implemented. No system library,
+  PAM configuration, or existing fingerprint template was changed.
+  Patch: port/libfprint-aura-platform.patch.
+  Standard Settings enrollment and fingerprint unlock remain unfinished.
+
+Account enrollment bridge follow-up -- 2026-10-09
+  Separate transactional account storage, native enrollment/check/verify modes
+  and an unprivileged GCR prompt client are implemented and staged for testing.
+  PIN bytes pass directly through a private pipe to the native firmware client.
+  Account mode requires an existing Gatekeeper handle and never provisions or
+  resets it. The separate setup-PIN/account-password lifecycle is unresolved.
+  Sixteen storage tests and nineteen process/transaction tests passed on host
+  and phone; twenty native enrollment fault cases passed with ASan/UBSan.
+  The native child inherits the storage lock so broker death cannot race
+  cleanup against pending hardware writes.
+  A real enrollment through GNOME's setup-PIN prompt completed and reloaded in
+  a fresh process. Same-finger verification matched on retry after an initial
+  false rejection; a different finger was rejected. One new account record is
+  committed, with no pending record. Matching reliability needs further work.
+  Stock fprintd/Settings operations and the account-password lifecycle are not
+  connected; no fingerprint login or PAM change has been enabled.
+  Existing engineering enrollment and system authentication remain unchanged.
+
+Stock service integration trial -- 2026-10-09
+  Stock fprintd and libfprint packages are installed without libpam-fprintd.
+  An isolated operations library and root-only protocol bridge are staged;
+  twenty mocked libfprint cases, nine bridge cases and nineteen worker cases
+  pass on the build host. Exact opaque record references reject stale records.
+  A runtime-only service override selects the candidate library and adds
+  narrowly scoped TEE device/private state access. Original service sandbox
+  and PolicyKit policy remain in place. Remote non-active user access is denied.
+  Real libfprint opens, lists one private account record, and closes; the record
+  also reloads under the actual fprintd sandbox. Standard D-Bus lists the sensor.
+  Stock fprintd has no enrolled-finger metadata yet. Fresh Settings enrollment
+  is pending user readiness; existing diagnostic enrollment remains untouched.
+  No fingerprint login is enabled. The original engineering backend is unchanged.
+  Evidence: test-runs/snapshot/fprint-candidate-stage.txt,
+  fprint-stock-trial.txt, fprint-stock-check.txt and fprint-sandbox-check.txt.
+
+Stock Settings UI trial
+  The fingerprint row was initially hidden because the Phosh image lacks
+  org.gnome.login-screen. An unmodified GNOME GDM 50.0 schema supplied only to
+  the Settings process makes the row visible without changing login settings.
+  User reported that Scan new fingerprint stalls the Wayland dialog before
+  selecting a finger. No new enrollment began; the account record count remains
+  one with no pending record. Settings is reopened under XWayland for a menu
+  comparison. The cause of that UI stall is not yet established.
+  Under XWayland the user can select a finger, but enrollment initially failed.
+  A sandbox probe confirmed the desktop PIN-prompt bus was hidden by
+  ProtectHome. The temporary service now binds only UID 1000's bus socket to
+  a separate private-service path; home directories remain hidden. Updated
+  bridge/worker code uses the target UID's socket; twenty worker and nine bridge
+  tests pass. User retry is pending. Existing enrollment and login remain intact.
+
+Stock enrollment result
+  After the session-bus fix, user completed enrollment in unmodified GNOME
+  Settings. fprintd lists right-index-finger. Two private account records are
+  committed with no pending transaction: the earlier diagnostic slot and the
+  new stock-enrolled slot. Both reload successfully, and the stock listing
+  survives a service restart. Original engineering backend remains unchanged.
+  Two same-finger fprintd-verify checks returned verify-no-match, so matching
+  reliability remains unresolved. No different-finger check was attempted for
+  this enrollment, and fingerprint login remains disabled. The UI/service
+  integration remains a runtime trial, not a release-ready installation.
+  Next: diagnose native capture/matching quality without weakening thresholds,
+  overwriting enrollment, or treating transport success as a biometric match.
+  Evidence: fprint-settings-busfix-status.txt, fprint-stock-positive-retry.txt,
+  fprint-stock-final-health.txt under test-runs/snapshot.
+
+Verification diagnostics -- 2026-10-10 UTC
+  Adding stock authentication-challenge initialization alone did not fix the
+  false rejection. A subsequent three-touch run returned one no-match and two
+  operation errors. The successful capture reported coverage 91, quality 34;
+  the scale is not established, so this is not yet a quality diagnosis.
+  Native verification now follows stock recovery for identify status 2 and
+  recoverable capture responses, bounded to ten captures and the existing
+  polling timeout. Live trial returned normal identify status 0, coverage 81,
+  quality 58 and no-match; it did not exercise a poor-capture retry. Matching
+  remains unresolved. Twenty-one worker and ten bridge
+  tests pass; native mocked retry and exhaustion tests pass. Both enrollment
+  records reload after install; PAM remains unchanged and unlock disabled.
+  A direct comparison against the same saved right-index record outside
+  fprintd waited for a touch and timed out without capture. It does not yet
+  establish whether the service environment contributes to the rejection.
+  Retry only after user readiness. No template changes were made.
+
+User-requested fresh enrollment -- 2026-10-10 UTC
+  User requested deletion and re-enrollment of existing fingerprints.
+  fprintd-delete successfully removed the stock right-index enrollment.
+  The transactional store removed the remaining diagnostic account record;
+  the original engineering test database was also deleted. Confirmed zero
+  account records, no pending transaction, original test database absent,
+  and no enrolled fingers in fprintd. The setup PIN handle is retained.
+  Stock Settings reopened for fresh right-index enrollment; awaiting result.
+  Earlier matching results describe deleted records, not the new enrollment.
+  User initially found the fingerprint row missing. Process inspection showed
+  an older GNOME Settings instance running without GSETTINGS_SCHEMA_DIR;
+  single-instance activation redirected the candidate launch into that process.
+  Gracefully closed only that user's Settings process and relaunched under
+  aura-fprint-fresh-settings. Confirmed the candidate schema and X11 backend
+  in the actual new process, with the device visible and UI preference true.
+  User retry pending. Persistent Settings launch integration remains unfinished.
+  User completed fresh enrollment after the process correction. Confirmed one
+  committed record, no pending transaction, and stock fprintd lists right-thumb
+  (not the previously requested right-index slot). The new physical finger is
+  not yet confirmed; verification requests the exact finger just enrolled.
+  New right-thumb-slot verification pending. Fingerprint unlock stays disabled.
+  Fresh enrollment's first user-confirmed matching attempt returned no-match,
+  identify status 0, coverage 100, quality 52. Re-enrollment has not resolved
+  matching. Service restart retains the right-thumb listing; the single private
+  record (finger 6) reloads successfully, no pending transaction exists, and
+  PAM remains absent. New print remains saved for diagnosis.

@@ -1,0 +1,40 @@
+#!/usr/bin/python3
+"""Expose SSH only on the explicitly selected Wi-Fi connection's IPv4 address."""
+import ipaddress
+import json
+from pathlib import Path
+import subprocess
+
+def run(*args):
+    return subprocess.run(args, check=True, capture_output=True, text=True).stdout.strip()
+
+profile = Path('/etc/aura-wifi-ssh-profile')
+if not profile.exists():
+    raise SystemExit(0)
+config = Path('/run/aura-wifi-ssh.conf')
+old = config.read_text() if config.exists() else ''
+try:
+    active = run('nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', 'wlan0')
+except subprocess.CalledProcessError:
+    active = ''
+addresses = []
+if active == profile.read_text().strip():
+    for interface in json.loads(run('ip', '-j', '-4', 'address', 'show', 'dev', 'wlan0')):
+        for entry in interface.get('addr_info', []):
+            address = ipaddress.ip_address(entry['local'])
+            if entry['scope'] == 'global' and address.is_private and not address.is_link_local:
+                addresses.append(str(address))
+new = ''.join('ListenAddress ' + a + ':22\n' for a in addresses)
+if new == old:
+    raise SystemExit(0)
+temporary = config.with_suffix('.new')
+temporary.write_text(new)
+temporary.chmod(0o600)
+temporary.replace(config)
+try:
+    run('/usr/sbin/sshd', '-t')
+    run('systemctl', 'reload-or-restart', 'ssh.service')
+except subprocess.CalledProcessError:
+    config.write_text(old)
+    raise
+print('Wi-Fi SSH listener updated for the selected network.' if addresses else 'Wi-Fi SSH listener removed.')

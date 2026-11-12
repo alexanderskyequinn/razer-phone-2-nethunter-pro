@@ -1,0 +1,19 @@
+#!/bin/sh
+# Keep charging at low capacity; only an unsafe temperature or exhausted,
+# unplugged battery powers off. All state stays in RAM.
+sleep 20
+while :; do
+    temp=$(cat /sys/class/power_supply/qcom-battery/temp 2>/dev/null)
+    capacity=$(cat /sys/class/power_supply/qcom-battery/capacity 2>/dev/null)
+    case "$temp:$capacity" in *[!0-9:]*|:*|*:) sleep 5; continue;; esac
+    powered=0
+    for s in /sys/class/power_supply/*; do
+        [ "$(cat "$s/online" 2>/dev/null)" = 1 ] && powered=1
+    done
+    if [ "$temp" -gt 430 ] || [ "$temp" -lt 100 ]; then
+        echo Unknown >/sys/class/power_supply/pmi8998-charger/status
+        poweroff -f
+    fi
+    if [ "$capacity" -lt 3 ] && [ "$powered" = 0 ]; then poweroff -f; fi
+    sleep 5
+done

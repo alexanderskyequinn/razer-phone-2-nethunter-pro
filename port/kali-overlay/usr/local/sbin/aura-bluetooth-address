@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+address=$(cat /etc/aura/bluetooth-address)
+count=0
+while [ ! -d /sys/class/bluetooth/hci0 ]; do
+    count=$((count + 1))
+    [ "$count" -lt 30 ] || exit 1
+    sleep 1
+done
+# Firmware initialization happens asynchronously after the HCI device appears.
+count=0
+while ! btmgmt -i 0 public-addr "$address"; do
+    count=$((count + 1))
+    [ "$count" -lt 15 ] || exit 1
+    sleep 1
+done

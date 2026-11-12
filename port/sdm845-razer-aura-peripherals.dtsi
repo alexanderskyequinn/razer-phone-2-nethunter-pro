@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Board wiring and regulator limits verified against the stock live tree. */
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&aura_volume_down>;
+		volume-down {
+			label = "Volume Down";
+			gpios = <&pm8998_gpios 6 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <15>;
+			wakeup-source;
+		};
+	};
+};
+&pm8998_gpios {
+	aura_volume_down: volume-down-state {
+		pins = "gpio6";
+		function = "normal";
+		input-enable;
+		bias-pull-up;
+		power-source = <0>;
+	};
+};
+&apps_rsc {
+	regulators-0 {
+		vdd-l13-l19-l21-supply = <&vreg_bob>;
+		vreg_l13a: ldo13 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+		vreg_l21a: ldo21 {
+			regulator-min-microvolt = <2704000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+};
+&sdhc_2 {
+	status = "okay";
+	bus-width = <4>;
+	cd-gpios = <&tlmm 126 GPIO_ACTIVE_LOW>;
+	vmmc-supply = <&vreg_l21a>;
+	vqmmc-supply = <&vreg_l13a>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&aura_sdc2_clk &aura_sdc2_cmd &aura_sdc2_data &aura_sd_detect>;
+};
+&tlmm {
+	aura_sdc2_clk: sdc2-clk-state {
+		pins = "sdc2_clk";
+		drive-strength = <16>;
+		bias-disable;
+	};
+	aura_sdc2_cmd: sdc2-cmd-state {
+		pins = "sdc2_cmd";
+		drive-strength = <10>;
+		bias-pull-up;
+	};
+	aura_sdc2_data: sdc2-data-state {
+		pins = "sdc2_data";
+		drive-strength = <10>;
+		bias-pull-up;
+	};
+	aura_sd_detect: sd-detect-state {
+		pins = "gpio126";
+		function = "gpio";
+		input-enable;
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+};
+&pmi8998_haptics {
+	status = "okay";
+	qcom,wave-play-rate-us = <6667>;
+	qcom,vmax-mv = <1300>;
+};
+&ipa {
+	status = "okay";
+	qcom,gsi-loader = "self";
+	memory-region = <&ipa_fw_mem>;
+	firmware-name = "qcom/sdm845/razer/aura/ipa_fws.mdt";
+};
+&slpi_pas {
+	status = "okay";
+	firmware-name = "qcom/sdm845/razer/aura/slpi.mdt";
+};
+&venus {
+	status = "okay";
+	firmware-name = "qcom/sdm845/razer/aura/venus.mdt";
+};

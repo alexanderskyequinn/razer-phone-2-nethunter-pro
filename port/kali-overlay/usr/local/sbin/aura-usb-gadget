@@ -1,0 +1,45 @@
+#!/bin/sh
+set -eu
+ip() { /usr/local/libexec/busybox ip "$@"; }
+mkdir -p /sys/kernel/config
+mountpoint -q /sys/kernel/config || mount -t configfs configfs /sys/kernel/config
+g=/sys/kernel/config/usb_gadget/aura
+mkdir -p "$g"
+echo 0x1d6b >"$g/idVendor"
+echo 0x0104 >"$g/idProduct"
+echo 0x0200 >"$g/bcdUSB"
+echo 0x0100 >"$g/bcdDevice"
+echo 0xEF >"$g/bDeviceClass"
+echo 0x02 >"$g/bDeviceSubClass"
+echo 0x01 >"$g/bDeviceProtocol"
+mkdir -p "$g/strings/0x409" "$g/configs/c.1/strings/0x409"
+echo aura-diag-v2 >"$g/strings/0x409/serialnumber"
+echo 'Aura port development' >"$g/strings/0x409/manufacturer"
+echo 'Kali NetHunter Pro - Razer Phone 2' >"$g/strings/0x409/product"
+echo 'USB development access' >"$g/configs/c.1/strings/0x409/configuration"
+echo 500 >"$g/configs/c.1/MaxPower"
+mkdir -p "$g/functions/ncm.usb0"
+echo 02:00:00:84:50:01 >"$g/functions/ncm.usb0/dev_addr"
+echo 02:00:00:84:50:02 >"$g/functions/ncm.usb0/host_addr"
+[ -e "$g/configs/c.1/ncm.usb0" ] || ln -s "$g/functions/ncm.usb0" "$g/configs/c.1/ncm.usb0"
+controller=
+for i in $(seq 1 30); do
+    controller=$(ls /sys/class/udc | head -n 1)
+    [ -n "$controller" ] && break
+    sleep 1
+done
+[ -n "$controller" ]
+echo "$controller" >"$g/UDC"
+ip link set usb0 up
+ip address add 192.0.2.1/24 dev usb0
+ip address add 169.254.84.5/16 dev usb0
+cat >/run/aura-udhcpd.conf <<'EOF'
+start 192.0.2.2
+end 192.0.2.2
+interface usb0
+lease_file /run/aura-udhcpd.leases
+pidfile /run/aura-udhcpd.pid
+option subnet 255.255.255.0
+option lease 600
+EOF
+touch /run/aura-udhcpd.leases

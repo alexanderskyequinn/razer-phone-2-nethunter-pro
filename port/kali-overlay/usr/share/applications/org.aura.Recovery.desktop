@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Recovery
+Comment=Restart into Aura Recovery
+Exec=/usr/local/bin/aura-recovery-app
+Icon=system-reboot-symbolic
+Terminal=false
+Categories=System;
+X-Purism-FormFactor=Workstation;Mobile;

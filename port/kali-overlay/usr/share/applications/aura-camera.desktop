@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Rear Camera Test
+Comment=Diagnostic fallback for the rear camera
+NoDisplay=true
+Exec=/usr/local/bin/aura-camera
+Icon=camera-photo
+Terminal=false
+Categories=Graphics;Photography;
+X-Purism-FormFactor=Workstation;Mobile;

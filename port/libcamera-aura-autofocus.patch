@@ -1,0 +1,216 @@
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -31,8 +31,13 @@
+ #include <libcamera/geometry.h>
+ #include <libcamera/pixel_format.h>
+ #include <libcamera/stream.h>
++#include <libcamera/formats.h>
+ 
+ #include "libcamera/internal/camera.h"
++#include "libcamera/internal/camera_lens.h"
++#include "libcamera/internal/mapped_framebuffer.h"
++#include "libcamera/internal/dma_buf_allocator.h"
++#include "aura_focus_search.h"
+ #include "libcamera/internal/camera_manager.h"
+ #include "libcamera/internal/camera_sensor.h"
+ #include "libcamera/internal/camera_sensor_properties.h"
+@@ -361,6 +366,22 @@
+ 	std::unique_ptr<SoftwareIsp> swIsp_;
+ 	SimpleFrames frameInfo_;
+ 
++    // AURA bounded contrast autofocus: keep the device-specific prototype
++    // confined to the known main sensor/lens pair and stock DAC range.
++    bool auraFocusEnabled_ = false;
++    int auraFocusMode_ = controls::AfModeContinuous;
++    int auraFocusPosition_ = 50;
++    int auraFocusState_ = controls::AfStateIdle;
++    unsigned int auraWait_ = 20, auraSamples_ = 0, auraCooldown_ = 0;
++    unsigned int auraBadFrames_ = 0;
++    double auraScoreSum_ = 0, auraReference_ = 0;
++    bool auraPending_ = true;
++    AuraFocusSearch auraFocus_;
++    void auraFocusControls(const ControlList &controls);
++    void auraFocusBuffer(FrameBuffer *buffer);
++    bool auraMove(int position);
++
++
+ private:
+ 	void tryPipeline(unsigned int code, const Size &size);
+ 	static std::vector<const MediaPad *> routedSourcePads(MediaPad *sink);
+@@ -628,6 +649,17 @@
+ 			swIsp_->setSensorControls.connect(this, &SimpleCameraData::setSensorControls);
+ 		}
+ 	}
++
++    auto *lens = sensor_->focusLens();
++    auraFocusEnabled_ = swIsp_ && sensor_->model() == "imx363" && lens &&
++        lens->model().find("bu64753") != std::string::npos;
++    if (auraFocusEnabled_) {
++        ControlInfoMap::Map map(controlInfo_.begin(), controlInfo_.end());
++        map[&controls::AfMode] = ControlInfo(controls::AfModeValues);
++        map[&controls::AfTrigger] = ControlInfo(controls::AfTriggerValues);
++        controlInfo_ = ControlInfoMap(std::move(map), controls::controls);
++        LOG(SimplePipeline, Info) << "AURA contrast autofocus available";
++    }
+ 
+ 	video_ = pipe->video(entities_.back().entity);
+ 	ASSERT(video_);
+@@ -1018,10 +1050,136 @@
+ {
+ 	SimplePipelineHandler *pipe = SimpleCameraData::pipe();
+ 
++	auraFocusBuffer(buffer);
++
+ 	/* Complete the buffer and the request. */
+ 	Request *request = buffer->request();
+ 	if (pipe->completeBuffer(request, buffer))
+ 		tryCompleteRequest(request);
++}
++
++
++bool SimpleCameraData::auraMove(int position)
++{
++    const int ret = sensor_->focusLens()->setFocusPosition(std::clamp(position, 50, 800));
++    if (ret) {
++        auraFocusState_ = controls::AfStateFailed;
++        auraPending_ = false;
++        auraFocus_.cancel();
++        LOG(SimplePipeline, Error) << "AURA lens movement failed: " << ret;
++        return false;
++    }
++    auraFocusPosition_ = std::clamp(position, 50, 800);
++    auraWait_ = 8; // Existing queued frames plus mechanical settling.
++    auraSamples_ = 0;
++    auraScoreSum_ = 0;
++    return true;
++}
++
++void SimpleCameraData::auraFocusControls(const ControlList &ctrls)
++{
++    if (!auraFocusEnabled_)
++        return;
++    if (auto mode = ctrls.get(controls::AfMode)) {
++        if (*mode != auraFocusMode_) {
++            auraFocusMode_ = *mode;
++            auraFocus_.cancel();
++            auraFocusState_ = controls::AfStateIdle;
++            auraPending_ = *mode == controls::AfModeContinuous;
++        }
++    }
++    if (auto trigger = ctrls.get(controls::AfTrigger)) {
++        if (*trigger == controls::AfTriggerStart && auraFocusMode_ == controls::AfModeAuto)
++            auraPending_ = true;
++        if (*trigger == controls::AfTriggerCancel) {
++            if (auraFocusState_ == controls::AfStateScanning)
++                auraMove(auraFocus_.cancel());
++            auraPending_ = false;
++            auraFocusState_ = controls::AfStateIdle;
++        }
++    }
++}
++
++void SimpleCameraData::auraFocusBuffer(FrameBuffer *buffer)
++{
++    if (!auraFocusEnabled_ || !buffer->request())
++        return;
++    auto &metadata = buffer->request()->_d()->metadata();
++    metadata.set(controls::AfState, auraFocusState_);
++    if (buffer->metadata().status != FrameMetadata::FrameSuccess ||
++        auraFocusMode_ == controls::AfModeManual)
++        return;
++    const auto &buffers = buffer->request()->buffers();
++    auto entry = std::find_if(buffers.begin(), buffers.end(),
++                             [buffer](const auto &item) { return item.second == buffer; });
++    if (entry == buffers.end()) return;
++    const auto &cfg = entry->first->configuration();
++    if (cfg.pixelFormat != formats::XRGB8888 && cfg.pixelFormat != formats::ARGB8888 &&
++        cfg.pixelFormat != formats::XBGR8888 && cfg.pixelFormat != formats::ABGR8888)
++        return;
++    if (auraWait_) { --auraWait_; return; }
++    if (auraPending_) {
++        auraPending_ = false;
++        auraFocusState_ = controls::AfStateScanning;
++        auraMove(auraFocus_.start(auraFocusPosition_));
++        return;
++    }
++    if (auraCooldown_) { --auraCooldown_; return; }
++    if (cfg.size.width < 64 || cfg.size.height < 64 || cfg.stride < cfg.size.width * 4)
++        return;
++    DmaSyncer sync(buffer->planes()[0].fd, DmaSyncer::SyncType::Read);
++    MappedFrameBuffer mapped(buffer, MappedFrameBuffer::MapFlag::Read);
++    if (!mapped.isValid() || mapped.planes().empty() ||
++        mapped.planes()[0].size() < cfg.stride * cfg.size.height)
++        return;
++    const auto plane = mapped.planes()[0];
++    double edges = 0, mean = 0;
++    unsigned int count = 0;
++    auto green = [&](unsigned int x, unsigned int y) {
++        unsigned int sum = 0;
++        for (unsigned int dy = 0; dy < 4; ++dy)
++            for (unsigned int dx = 0; dx < 4; ++dx)
++                sum += plane[(y + dy) * cfg.stride + (x + dx) * 4 + 1];
++        return sum / 16.0;
++    };
++    for (unsigned int y = cfg.size.height / 3; y < cfg.size.height * 2 / 3; y += 8)
++        for (unsigned int x = cfg.size.width / 3; x < cfg.size.width * 2 / 3; x += 8) {
++            double value = green(x, y);
++            mean += value;
++            double dx = value - green(x + 4, y);
++            double dy = value - green(x, y + 4);
++            edges += dx * dx + dy * dy;
++            ++count;
++        }
++    const double denominator = std::max(mean, count * 8.0);
++    const double score = edges * count / (denominator * denominator);
++    if (auraFocusState_ == controls::AfStateScanning) {
++        auraScoreSum_ += score;
++        if (++auraSamples_ < 2) return;
++        auto next = auraFocus_.sample(auraScoreSum_ / auraSamples_);
++        if (next && !auraMove(*next)) return;
++        if (auraFocus_.state() == AuraFocusSearch::State::Focused ||
++            auraFocus_.state() == AuraFocusSearch::State::Failed) {
++            auraFocusState_ = auraFocus_.state() == AuraFocusSearch::State::Focused ?
++                controls::AfStateFocused : controls::AfStateFailed;
++            auraReference_ = auraFocus_.score();
++            auraCooldown_ = 120;
++            auraBadFrames_ = 0;
++            LOG(SimplePipeline, Info) << "AURA focus result position=" << auraFocusPosition_
++                << " score=" << auraReference_ << " state=" << auraFocusState_;
++        }
++    } else if (auraFocusMode_ == controls::AfModeContinuous) {
++        // Refocus after a sustained contrast loss, not every small fluctuation.
++        if (score < auraReference_ * 0.65 || auraFocusState_ == controls::AfStateFailed)
++            ++auraBadFrames_;
++        else
++            auraBadFrames_ = 0;
++        if (auraBadFrames_ >= 20) {
++            auraPending_ = true;
++            auraBadFrames_ = 0;
++        }
++    }
++    metadata.set(controls::AfState, auraFocusState_);
+ }
+ 
+ void SimpleCameraData::ispStatsReady(uint32_t frame, uint32_t bufferId)
+@@ -1664,6 +1822,13 @@
+ 
+ 	video->bufferReady.connect(data, &SimpleCameraData::imageBufferReady);
+ 
++    data->auraFocus_.cancel();
++    data->auraFocusMode_ = controls::AfModeContinuous;
++    data->auraFocusState_ = controls::AfStateIdle;
++    data->auraWait_ = 20;
++    data->auraCooldown_ = 0;
++    data->auraPending_ = true;
++    if (controls) data->auraFocusControls(*controls);
+ 	data->delayedCtrls_->reset();
+ 	if (frameStartEmitter) {
+ 		ret = frameStartEmitter->setFrameStartEnabled(true);
+@@ -1737,6 +1902,7 @@
+ int SimplePipelineHandler::queueRequestDevice(Camera *camera, Request *request)
+ {
+ 	SimpleCameraData *data = cameraData(camera);
++	data->auraFocusControls(request->controls());
+ 	int ret;
+ 
+ 	std::map<const Stream *, FrameBuffer *> buffers;

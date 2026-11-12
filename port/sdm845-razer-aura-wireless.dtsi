@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
+/* Stock RC2 P9221 receiver is on SE7 at 0x61.
+ * First stage enables only bus access for identification/telemetry.
+ * Receiver enable, firmware, FOD, voltage and charge limits are unchanged.
+ */
+&i2c7 {
+    status = "okay";
+    clock-frequency = <400000>;
+};

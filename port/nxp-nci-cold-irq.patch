@@ -1,0 +1,27 @@
+--- a/drivers/nfc/nxp-nci/i2c.c
++++ b/drivers/nfc/nxp-nci/i2c.c
+@@ -221,8 +221,10 @@
+ 		r = nxp_nci_i2c_fw_read(phy, &skb);
+ 		break;
+ 	case NXP_NCI_MODE_COLD:
+-		r = -EREMOTEIO;
+-		break;
++		/* A queued interrupt after power-down is not a hardware fault.
++		 * Latching it would prevent the next normal NCI startup.
++		 */
++		goto exit_irq_handled;
+ 	}
+ 
+ 	if (r == -EREMOTEIO) {
+@@ -307,8 +309,10 @@
+ 				 nxp_nci_i2c_irq_thread_fn,
+ 				 IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+ 				 NXP_NCI_I2C_DRIVER_NAME, phy);
+-	if (r < 0)
++	if (r < 0) {
+ 		nfc_err(&client->dev, "Unable to register IRQ handler\n");
++		nxp_nci_remove(phy->ndev);
++	}
+ 
+ 	return r;
+ }

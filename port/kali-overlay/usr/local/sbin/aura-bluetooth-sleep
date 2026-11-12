@@ -1,0 +1,29 @@
+#!/bin/sh
+# Razer's temporary no-IBS Bluetooth setup must power down across suspend.
+set -eu
+state=/run/aura-bluetooth-sleep/restore
+case "${1:-}" in
+prepare)
+    tr '\000' '\n' </proc/device-tree/compatible | grep -qx 'razer,aura' || exit 1
+    install -d -m 700 /run/aura-bluetooth-sleep
+    # A failed previous restore remains visible and can be retried.
+    if ! systemctl is-active --quiet bluetooth.service; then exit 0; fi
+    powered=$(busctl --timeout=10 get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered)
+    if [ "$powered" = 'b true' ]; then
+        : > "$state"
+        if ! busctl --timeout=15 set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered b false; then
+            rm -f "$state"
+            exit 1
+        fi
+        echo 'Bluetooth powered down for suspend.'
+    fi
+    ;;
+restore)
+    if [ -f "$state" ]; then
+        busctl --timeout=20 set-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered b true
+        rm -f "$state"
+        echo 'Bluetooth powered state restored after suspend.'
+    fi
+    ;;
+*) echo 'Usage: aura-bluetooth-sleep prepare|restore' >&2; exit 2;;
+esac

@@ -1,0 +1,79 @@
+#!/usr/bin/python3
+"""One-time, local-only PIN enrollment. No credentials are logged or saved here."""
+import json
+import os
+from pathlib import Path
+import re
+import socket
+import struct
+import subprocess
+import uuid
+
+STATE = Path('/var/lib/aura/setup-complete')
+SOCKET = Path('/run/aura-setup/control')
+
+def validate(request):
+    if not isinstance(request, dict) or set(request) != {'pin', 'confirm', 'timezone'}:
+        raise ValueError('Invalid setup request.')
+    pin = request['pin']
+    if not isinstance(pin, str) or not re.fullmatch(r'[0-9]{6,12}', pin):
+        raise ValueError('Choose a PIN with 6 to 12 digits.')
+    if pin != request['confirm']:
+        raise ValueError('The PINs do not match.')
+    zone = request['timezone']
+    if not isinstance(zone, str) or not re.fullmatch(r'[A-Za-z0-9_+/-]{1,80}', zone):
+        raise ValueError('Choose a valid time zone.')
+    zones = Path('/usr/share/zoneinfo').resolve()
+    path = (zones / zone).resolve()
+    if not path.is_relative_to(zones) or not path.is_file() or path.read_bytes()[:4] != b'TZif':
+        raise ValueError('That time zone is unavailable.')
+    return pin, zone
+
+def main():
+    if STATE.exists():
+        return
+    assert os.getuid() == 0
+    SOCKET.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    SOCKET.unlink(missing_ok=True)
+    with socket.socket(socket.AF_UNIX) as server:
+        server.bind(str(SOCKET))
+        os.chown(SOCKET, 1000, 1000)
+        os.chmod(SOCKET, 0o600)
+        server.listen(1)
+        while not STATE.exists():
+            connection, _ = server.accept()
+            with connection:
+                connection.settimeout(5)
+                _, uid, _ = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                if uid != 1000:
+                    continue
+                try:
+                    data = bytearray()
+                    while b'\n' not in data and len(data) <= 2048:
+                        chunk = connection.recv(512)
+                        if not chunk:
+                            break
+                        data.extend(chunk)
+                    if len(data) > 2048 or b'\n' not in data:
+                        raise ValueError('Incomplete setup request.')
+                    pin, zone = validate(json.loads(data.split(b'\n')[0]))
+                    subprocess.run(['/usr/sbin/chpasswd'], input=f'kali:{pin}\n'.encode(), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(['timedatectl', 'set-timezone', zone], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # Remove the system default that allows swipe-only setup access.
+                    Path('/etc/dconf/db/local.d/90-aura-setup').unlink(missing_ok=True)
+                    subprocess.run(['dconf', 'update'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    STATE.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+                    temp = STATE.with_suffix('.tmp')
+                    temp.write_text('Setup completed locally.\n')
+                    temp.chmod(0o644)
+                    os.replace(temp, STATE)
+                    connection.sendall(b'{"ok":true}\n')
+                except (ValueError, TypeError, OSError, subprocess.SubprocessError):
+                    try:
+                        connection.sendall(b'{"ok":false,"message":"Setup did not finish. Check that both PINs match and try again."}\n')
+                    except OSError:
+                        pass
+    SOCKET.unlink(missing_ok=True)
+
+if __name__ == '__main__':
+    main()

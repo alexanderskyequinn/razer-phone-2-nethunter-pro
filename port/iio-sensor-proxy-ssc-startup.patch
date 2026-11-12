@@ -1,0 +1,50 @@
+--- a/src/iio-sensor-proxy.c
++++ b/src/iio-sensor-proxy.c
+@@ -746,15 +746,12 @@
+ 		data->clients[i] = create_clients_hash_table ();
+ 
+ 	data->connection = g_object_ref (connection);
+-}
+-
+-static void
+-name_acquired_handler (GDBusConnection *connection,
+-		       const gchar     *name,
+-		       gpointer         user_data)
+-{
+-	SensorData *data = user_data;
+-	guint i;
++
++	/* SSC synchronous discovery runs a nested main loop. Finish discovery
++	 * before g_bus_own_name() publishes the well-known name, otherwise a
++	 * client can cache HasAccelerometer=false and never claim the sensor.
++	 * Availability notifications are sent only to clients with a claim.
++	 */
+ 
+ 	if (!find_sensors (data->client, data))
+ 		goto bail;
+@@ -784,14 +781,23 @@
+ 	if (!any_sensors_left (data))
+ 		goto bail;
+ 
+-	send_dbus_event (data, PROP_ALL);
+-	send_dbus_event (data, PROP_ALL_COMPASS);
+ 	return;
+ 
+ bail:
+ 	data->ret = 0;
+ 	g_message ("No sensors or missing kernel drivers for the sensors. Exiting");
+ 	g_main_loop_quit (data->loop);
++}
++
++static void
++name_acquired_handler (GDBusConnection *connection,
++                       const gchar     *name,
++                       gpointer         user_data)
++{
++	SensorData *data = user_data;
++
++	send_dbus_event (data, PROP_ALL);
++	send_dbus_event (data, PROP_ALL_COMPASS);
+ }
+ 
+ static gboolean

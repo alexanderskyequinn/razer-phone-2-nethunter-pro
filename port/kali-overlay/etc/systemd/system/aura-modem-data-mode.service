@@ -1,0 +1,14 @@
+[Unit]
+Description=Razer modem data preference while IMS support is incomplete
+After=ModemManager.service
+PartOf=ModemManager.service
+ConditionPathExists=/usr/local/libexec/aura-modem-data-mode
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aura-modem-data-startup
+TimeoutStartSec=165
+RemainAfterExit=yes
+
+[Install]
+WantedBy=ModemManager.service

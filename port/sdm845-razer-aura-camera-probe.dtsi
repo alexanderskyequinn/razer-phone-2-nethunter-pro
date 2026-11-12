@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Standalone candidate only; exact GPIO wiring from retained Android DT. */
+/ {
+    aura_tele_ana: regulator-tele-analog {
+        compatible = "regulator-fixed";
+        regulator-name = "aura-tele-analog";
+        gpio = <&tlmm 100 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_tele_ana_enable>;
+    };
+    aura_tele_dig: regulator-tele-digital {
+        compatible = "regulator-fixed";
+        regulator-name = "aura-tele-digital";
+        gpio = <&tlmm 103 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_tele_dig_enable>;
+    };
+    aura_tele_io: regulator-tele-io {
+        compatible = "regulator-fixed";
+        regulator-name = "aura-tele-io";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        vin-supply = <&aura_camera_lvs1>;
+        gpio = <&tlmm 123 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_tele_io_enable>;
+        startup-delay-us = <233>;
+    };
+    aura_front_ana: regulator-front-analog {
+        compatible = "regulator-fixed";
+        regulator-name = "aura-front-analog";
+        gpio = <&pm8998_gpios 7 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_front_ana_enable>;
+    };
+    aura_front_dig: regulator-front-digital {
+        compatible = "regulator-fixed";
+        regulator-name = "aura-front-digital";
+        gpio = <&pm8998_gpios 4 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_front_dig_enable>;
+    };
+    aura_front_io: regulator-front-io {
+        compatible = "regulator-fixed";
+        regulator-name = "aura-front-io";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+        vin-supply = <&aura_camera_lvs1>;
+        gpio = <&pm8998_gpios 8 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_front_io_enable>;
+        startup-delay-us = <233>;
+    };
+};
+&tlmm {
+    aura_tele_ana_enable: tele-analog-enable-state { pins = "gpio100"; function = "gpio"; drive-strength = <2>; bias-disable; };
+    aura_tele_dig_enable: tele-digital-enable-state { pins = "gpio103"; function = "gpio"; drive-strength = <2>; bias-disable; };
+    aura_tele_io_enable: tele-io-enable-state { pins = "gpio123"; function = "gpio"; drive-strength = <2>; bias-disable; };
+    aura_tele_mclk: tele-mclk-state { pins = "gpio14"; function = "cam_mclk"; drive-strength = <2>; bias-disable; };
+    aura_tele_reset: tele-reset-state { pins = "gpio30"; function = "gpio"; drive-strength = <2>; bias-disable; };
+    aura_front_mclk: front-mclk-state { pins = "gpio15"; function = "cam_mclk"; drive-strength = <2>; bias-disable; };
+    aura_front_reset: front-reset-state { pins = "gpio9"; function = "gpio"; drive-strength = <2>; bias-disable; };
+};
+&pm8998_gpios {
+    aura_front_ana_enable: front-analog-enable-state { pins = "gpio7"; function = "normal"; power-source = <0>; bias-disable; };
+    aura_front_dig_enable: front-digital-enable-state { pins = "gpio4"; function = "normal"; power-source = <0>; bias-disable; };
+    aura_front_io_enable: front-io-enable-state { pins = "gpio8"; function = "normal"; power-source = <0>; bias-disable; };
+};
+&cci {
+    pinctrl-0 = <&cci0_default &cci1_default>;
+    pinctrl-1 = <&cci0_sleep &cci1_sleep>;
+};
+&cci_i2c1 {
+    status = "okay";
+    clock-frequency = <400000>;
+    camera-probe@1a {
+        compatible = "razer,aura-imx351-probe";
+        reg = <0x1a>;
+        reset-gpios = <&tlmm 30 GPIO_ACTIVE_LOW>;
+        clocks = <&clock_camcc CAM_CC_MCLK1_CLK>;
+        clock-names = "xvclk";
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_tele_mclk &aura_tele_reset>;
+        vana-supply = <&aura_tele_ana>;
+        vdig-supply = <&aura_tele_dig>;
+        vio-supply = <&aura_tele_io>;
+    };
+    camera-probe@2d {
+        compatible = "razer,aura-s5k3h7-probe";
+        reg = <0x2d>;
+        reset-gpios = <&tlmm 9 GPIO_ACTIVE_LOW>;
+        clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
+        clock-names = "xvclk";
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_front_mclk &aura_front_reset>;
+        vana-supply = <&aura_front_ana>;
+        vdig-supply = <&aura_front_dig>;
+        vio-supply = <&aura_front_io>;
+    };
+};

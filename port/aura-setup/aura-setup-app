@@ -1,0 +1,98 @@
+#!/usr/bin/python3
+"""First-run setup for the phone; --preview never connects to the setup service."""
+import json
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import threading
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, GLib
+
+preview = '--preview' in sys.argv
+if not preview and Path('/var/lib/aura/setup-complete').exists():
+    raise SystemExit(0)
+
+window = Gtk.Window(title='Welcome to Kali')
+window.set_default_size(360, 680)
+window.connect('delete-event', lambda *_: not preview)
+window.connect('destroy', Gtk.main_quit)
+box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin=22)
+window.add(box)
+title = Gtk.Label()
+title.set_markup('<span size="xx-large" weight="bold">Welcome to Kali</span>')
+box.pack_start(title, False, False, 12)
+intro = Gtk.Label(label='Set a PIN for unlocking this phone and approving system changes. This installation has no shared default PIN.')
+intro.set_line_wrap(True)
+intro.set_max_width_chars(32)
+box.pack_start(intro, False, False, 0)
+entries = []
+for label in ('New PIN (6–12 digits)', 'Confirm PIN'):
+    field = Gtk.Entry(placeholder_text=label, visibility=False)
+    field.set_input_purpose(Gtk.InputPurpose.PIN)
+    field.set_max_length(12)
+    box.pack_start(field, False, False, 0)
+    entries.append(field)
+zone = Gtk.ComboBoxText()
+for name in ('UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Tokyo', 'Australia/Sydney'):
+    zone.append_text(name)
+zone.set_active(0)
+box.pack_start(Gtk.Label(label='Time zone (change later in Settings)'), False, False, 0)
+box.pack_start(zone, False, False, 0)
+info = Gtk.Label(label='Remote access is off. Connect to Wi-Fi in Settings after setup. Fingerprints can be enrolled later in Fingerprint.')
+info.set_line_wrap(True)
+info.set_max_width_chars(32)
+box.pack_start(info, False, False, 0)
+message = Gtk.Label()
+message.set_line_wrap(True)
+message.set_max_width_chars(32)
+box.pack_start(message, False, False, 0)
+button = Gtk.Button(label='Finish setup')
+box.pack_start(button, False, False, 0)
+
+def finished(result):
+    button.set_sensitive(True)
+    if result.get('ok'):
+        for field in entries:
+            field.set_text('')
+        message.set_text('Preview complete. Nothing was changed.' if preview else 'Ready. Use your new PIN the next time you unlock the phone.')
+        if not preview:
+            subprocess.run(['gsettings', 'reset', 'sm.puri.phosh.lockscreen', 'require-unlock'])
+            GLib.timeout_add_seconds(2, lambda: window.destroy())
+    else:
+        message.set_text(result.get('message', 'Setup could not connect. Try again.'))
+    return False
+
+def submit(_):
+    pin, confirm = (e.get_text() for e in entries)
+    if not 6 <= len(pin) <= 12 or any(c not in '0123456789' for c in pin) or pin != confirm:
+        message.set_text('Enter the same 6–12 digit PIN twice.')
+        return
+    if preview:
+        finished({'ok': True})
+        return
+    button.set_sensitive(False)
+    message.set_text('Setting up…')
+    request = {'pin': pin, 'confirm': confirm, 'timezone': zone.get_active_text()}
+    def worker():
+        try:
+            with socket.socket(socket.AF_UNIX) as client:
+                client.settimeout(20)
+                client.connect('/run/aura-setup/control')
+                client.sendall(json.dumps(request).encode()+b'\n')
+                response = b''
+                while b'\n' not in response and len(response) < 4096:
+                    chunk = client.recv(1024)
+                    if not chunk:
+                        break
+                    response += chunk
+                result = json.loads(response)
+        except (OSError, ValueError):
+            result = {'ok': False}
+        GLib.idle_add(finished, result)
+    threading.Thread(target=worker, daemon=True).start()
+button.connect('clicked', submit)
+window.show_all()
+window.fullscreen()
+Gtk.main()

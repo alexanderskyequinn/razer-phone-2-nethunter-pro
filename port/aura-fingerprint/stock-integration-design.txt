@@ -1,0 +1,190 @@
+Stock fingerprint integration: current boundary and next implementation
+=====================================================================
+
+Implemented and checked
+-----------------------
+Native libfprint discovers the real Aura platform device. The earlier discovery
+prototype remains separate. An operations candidate now implements open, close,
+enroll, verify, list, delete and cancellation through a root-only subprocess
+bridge. It passes twenty mocked library/protocol cases; nine bridge cases and
+nineteen worker cases pass on the build host. System libfprint is unchanged.
+
+Stock fprintd 1.94.5-4+b2 and libfprint 1:1.94.10-1 are installed. A temporary
+/run/systemd/system/fprintd.service.d/50-aura-candidate.conf selects the candidate
+library under /opt/aura-fprint-candidate. The stock service retains its sandbox
+and PolicyKit rules, with only secure-device access and private state/lock write
+paths added. Its real D-Bus service lists the sensor. A remote unprivileged user
+was denied by stock authorization. This is expected, not a reason to loosen it.
+The existing account record reloads in the actual service sandbox. A read-only
+libfprint check opens, lists one record, and closes successfully. No templates
+were exported. The original engineering backend hash is unchanged.
+
+Stock fprintd currently reports no enrolled fingers: the existing diagnostic
+account record has no fprintd-side enrollment metadata. Do not fabricate that
+metadata or overwrite the diagnostic record. A fresh Settings enrollment is
+pending. Settings is open behind the phone lock screen; user readiness is
+requested. No PAM fingerprint package or login policy has been installed.
+
+Settings initially hid the fingerprint row because Phosh lacked the stock
+org.gnome.login-screen schema. The account is local, and the active desktop
+session passes stock fprintd authorization. The unmodified GNOME GDM 50.0
+schema is now compiled under the candidate prefix and passed only to the test
+Settings process with GSETTINGS_SCHEMA_DIR. The standard fingerprint row is
+visibly present. No system-wide schema/login configuration is changed. User
+has been asked to enroll right-index-finger, keeping the diagnostic left-index
+slot untouched. The physical finger used in that earlier slot was unspecified.
+
+The Wayland finger-selection menu stalled before enrollment; an XWayland
+Settings trial lets the user reach finger selection. Enrollment then failed
+before capture. A separate sandbox probe reproduced EACCES connecting to the
+desktop session bus under ProtectHome=yes. Binding only /run/user/1000/bus to
+/run/aura-fprint-session-bus/1000 fixes that connection without exposing home
+directories. The candidate bridge now uses the target UID's bound socket path;
+the temporary service binds only UID 1000. Other accounts require explicit
+session-bus and secure-credential provisioning; they are not supported yet.
+Twenty worker tests and nine bridge tests pass with this change. The corrected
+service is active with ProtectHome=yes and NoNewPrivileges=yes; the user has
+been asked to retry stock enrollment. Hardware enrollment remains unverified
+until that retry completes.
+
+Completed retry: the user enrolled through stock Settings successfully.
+fprintd lists right-index-finger; two private account records exist and no
+transaction is pending. Both records reload and the fprintd listing survives
+a service restart. Two same-finger standard verification checks nevertheless
+returned verify-no-match. The exact record reference passes the bridge's
+manifest binding check, and fresh reload succeeds; no match was reported by
+secure firmware. Different-finger testing is deferred until a positive match
+works reliably. The stock identify wrapper was rechecked: status is at offset
+8 and matched identifier at offset 12, consistent with the native client.
+This does not establish why those captures failed to match. No matching
+thresholds, templates, PIN policy or login configuration have been changed.
+
+Verification follow-up, 2026-10-10 UTC: stock HAL initializes (3,1) with an
+authentication challenge before capture. The candidate now does likewise,
+using a fresh nonce; the live challenge-only trial still returned no-match.
+A three-touch diagnostic returned one no-match (coverage 91, quality 34),
+then two operation errors. The metric scale is not yet interpreted. Stock
+HAL treats identify status 2 as insufficient acquisition and retries; our
+previous client treated any nonzero status as a hard error. The candidate
+now retries recoverable captures and status 2 within the existing time budget,
+at most ten attempts. Match IDs and thresholds are unchanged. Mock tests cover
+quality retry followed by match and ten exhausted retries without false success.
+Only scalar status/coverage/quality are logged; no biometric images or templates
+are exported. The new live trial returned identify status 0, coverage 81 and
+quality 58, but still no-match. No retry response occurred in this trial, so
+the retry branch has synthetic coverage only. Both saved records still reload,
+and the original engineering backend and system login configuration are intact.
+
+aura_fprint_store.py supplies isolated account/finger records, an exclusive
+worker lock, transactional commit, cancellation, deletion tombstones and
+interrupted-operation recovery. Its manifest references opaque database files;
+the module never reads their contents. Sixteen synthetic tests passed on the
+Linux build host and on the phone. Real firmware enrollment/reload is described below.
+
+aura_fprint_worker.py now routes an authorized account/finger record to the
+native enrollment and verification operations while holding the private store lock. It bounds
+output, maps match/no-match/retry/cancellation, rejects incomplete successes,
+and reaps the native process before releasing the lock. The child inherits the
+store lock so a dead broker cannot let crash recovery race hardware cleanup.
+Nineteen synthetic tests
+passed on both build host and phone before the record-reference binding change;
+the current version passes nineteen host tests. The stock driver now calls the
+bridge; authorization belongs to fprintd, not this internal worker.
+
+The native backend has bounded --account-check, --account-verify and
+--account-enroll modes.
+They construct database paths from checked UID/finger/record identifiers,
+validate private parent directories, and hold the shared engineering-app
+sensor lock. Parent death requests cancellation. Ten verification and twenty
+enrollment mock cases plus path-boundary and legacy ASan/UBSan regressions
+passed. The candidate is staged privately on the phone, not installed as its
+authentication backend. A real trial completed secure enrollment through the
+GNOME prompt and reloaded its private database in a fresh process. The enrolled
+finger matched on the second verification attempt; the first was a false
+rejection. A different finger was rejected. This is a small functional check,
+not evidence of production matching reliability. One account record is committed
+and no pending record remains; the existing engineering enrollment is preserved.
+
+Gatekeeper request builders now accept explicit desktop account IDs. The
+existing engineering wrappers retain UID 1000 and the old wire format. Invalid
+UIDs, missing inputs and out-of-range spans are rejected. Full prior transport
+and biometric mock regressions still pass. The rebuilt binary is staged only;
+the original engineering backend and existing test enrollment are unchanged.
+The candidate worker is installed separately as aura-fpc-account-worker.
+
+Trusted callers and future transport
+------------------------------------
+Stock Settings should continue to use fprintd. fprintd's existing PolicyKit
+checks authorize the operation and target account; a username supplied to a
+driver is not itself evidence of authorization. Resolve the account through
+the system account service, bind UID and name, and fail closed on mismatch.
+The store is an internal root-only API, not a public D-Bus or command service.
+
+One bridge worker must hold both the shared sensor-operation lock used by the
+engineering app and the new store lock for the entire firmware session. Never
+allow the engineering app and the stock driver to command the sensor together.
+The new store is separate from the old test database. No automatic migration,
+deletion or re-enrollment of the existing fingerprint is implemented.
+
+Implemented internal enrollment sequence (Settings hardware trial pending):
+  1. Require a trusted root caller; stock fprintd supplies PolicyKit authorization.
+  2. Reserve an uncommitted database name in the private store.
+  3. Obtain a fresh secure-firmware enrollment challenge.
+  4. Obtain a genuine Gatekeeper authorization for that account and challenge.
+  5. Collect samples, with bounded progress/retry/cancel events mapped to
+     libfprint's standard events; live Settings presentation is not yet checked.
+  6. Save opaque firmware database and reload in a fresh session; verify its
+     expected group and enrolled ID before calling Store.commit().
+  7. Return an opaque record reference in the libfprint print metadata.
+Cancellation must stop/idly release the hardware before removing staged state.
+On deletion, revoke the manifest reference before cleaning the opaque file.
+Deletion of a file is not a claim of physical secure erasure on flash storage.
+
+Standard prompt transport implemented; public authorization still pending
+-----------------------------------------------
+The standard fprintd enrollment call passes a finger name, not an account PIN.
+The current vendor firmware requires a genuine Gatekeeper token. The working
+engineering app obtains it by accepting the separate setup PIN for that request.
+Do not invent a token, retain an account PIN, set a universal PIN, weaken
+PolicyKit, or substitute a machine-stored PIN for user authentication.
+
+The new native GCR client runs without root privileges in the resolved desktop
+account's session. It sends the existing firmware setup PIN directly through
+a private pipe to the native backend's locked input buffer. Python receives
+no credential bytes. The client collects no credential on its preview path.
+Cancellation closes the prompt, reaps workers, and cleans pending state.
+
+Account enrollment verifies an existing Gatekeeper handle only. UID 1000 reuses
+the original private handle; other UIDs require their own preexisting handle.
+Missing handles, wrong PINs and throttling stop without reset or provisioning.
+No new-account provisioning, password migration or password-change flow exists.
+The prompt explicitly describes the separate fingerprint setup PIN; this is
+not yet the normal account-password experience. Settings enrollment, cached
+authorizations and homed initial-login behavior remain open tasks. Stock
+fprintd D-Bus/PolicyKit is installed; no PAM module or login change is enabled.
+
+GNOME GCR 4.4.1 is present on the phone. A non-secret confirmation preview
+opened through its system prompter and was inspected in a remote screenshot:
+text and both buttons fit the screen. Explicit libgcrypt initialization removed
+the preview's startup warning. This establishes a standard prompt UI route,
+The new native client was also previewed and cancelled cleanly on the phone.
+Its credential transport passed synthetic process/privilege tests and real
+secure enrollment with the user's participation. The setup PIN was entered on
+the phone, not forwarded through the host or stored by the Python bridge.
+
+Acceptance before enabling fingerprint unlock
+---------------------------------------------
+Real account isolation and multiple fingers; cancellation during every phase;
+same-finger match and wrong-finger rejection; wrong-account and stale-token
+rejection; deletion/restart recovery; backend and sensor failures; standard
+Settings progress; PIN fallback and encrypted-home initial login behavior.
+Template files and PINs stay on the device. Tests establish storage behavior,
+wire formatting and basic live enrollment/reload/matching through the new
+worker. Standard Settings enrollment is now wired for a trial but has not
+completed one; fingerprint unlock remains disabled.
+
+References consulted
+--------------------
+https://fprint.freedesktop.org/fprintd-dev/Device.html
+https://fprint.freedesktop.org/libfprint-dev/FpPrint.html
+https://android.googlesource.com/platform/docs/source.android.com/+/57543d4/en/security/authentication/gatekeeper.html

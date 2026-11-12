@@ -1,0 +1,13 @@
+--- a/drivers/net/wireless/ath/ath10k/snoc.c
++++ b/drivers/net/wireless/ath/ath10k/snoc.c
+@@ -1347,7 +1347,9 @@
+ 	if (of_property_read_bool(dev->of_node, "qcom,snoc-host-cap-8bit-quirk"))
+ 		set_bit(ATH10K_SNOC_FLAG_8BIT_HOST_CAP_QUIRK, &ar_snoc->flags);
+ 
+-	if (of_property_read_bool(dev->of_node, "qcom,snoc-host-cap-skip-quirk"))
++	/* Razer stock ICNSS never sends HOST_CAP to its bundled firmware. */
++	if (of_machine_is_compatible("razer,aura") ||
++	    of_property_read_bool(dev->of_node, "qcom,snoc-host-cap-skip-quirk"))
+ 		set_bit(ATH10K_SNOC_FLAG_SKIP_HOST_CAP_QUIRK, &ar_snoc->flags);
+ }
+ 

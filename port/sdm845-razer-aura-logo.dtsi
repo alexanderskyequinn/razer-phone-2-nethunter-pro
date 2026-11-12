@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: GPL-2.0
+#include <dt-bindings/leds/common.h>
+/* Stock RC2: SE4 address 0x32, chip enable GPIO23, supply enable GPIO26. */
+/ {
+    aura_logo_supply: regulator-logo {
+        compatible = "regulator-fixed";
+        regulator-name = "aura-logo";
+        gpio = <&tlmm 26 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+        startup-delay-us = <1000>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_logo_power>;
+    };
+};
+
+&tlmm {
+    aura_logo_power: logo-power-state {
+        pins = "gpio26";
+        function = "gpio";
+        drive-strength = <2>;
+        bias-disable;
+    };
+    aura_logo_enable: logo-enable-state {
+        pins = "gpio23";
+        function = "gpio";
+        drive-strength = <2>;
+        bias-disable;
+    };
+};
+
+&i2c4 {
+    status = "okay";
+    clock-frequency = <400000>;
+    logo@32 {
+        compatible = "national,lp5523";
+        reg = <0x32>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+        enable-gpios = <&tlmm 23 GPIO_ACTIVE_HIGH>;
+        vdd-supply = <&aura_logo_supply>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&aura_logo_enable>;
+        clock-mode = /bits/ 8 <1>;
+        /* Match the stock 8mA channel current; disallow raising it above stock. */
+        led@0 { reg = <0>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo0"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+        led@1 { reg = <1>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo1"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+        led@2 { reg = <2>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo2"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+        led@3 { reg = <3>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo3"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+        led@4 { reg = <4>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo4"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+        led@5 { reg = <5>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo5"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+        led@6 { reg = <6>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo6"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+        led@7 { reg = <7>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo7"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+        led@8 { reg = <8>; color = <LED_COLOR_ID_MULTI>; chan-name = "aura:logo8"; led-cur = /bits/ 8 <80>; max-cur = /bits/ 8 <80>; };
+    };
+};

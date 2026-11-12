@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+policy=/sys/devices/system/cpu/cpufreq/policy4
+test "$(cat "$policy/scaling_driver")" = qcom-cpufreq-hw
+grep -qw 2803200 "$policy/scaling_boost_frequencies"
+# Permit the firmware-provided stock boost OPP. Keep the governor, minimum
+# frequencies, voltage tables and hardware/software thermal limits unchanged.
+echo 1 > /sys/devices/system/cpu/cpufreq/boost

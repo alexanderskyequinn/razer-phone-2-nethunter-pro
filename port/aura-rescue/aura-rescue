@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+export PATH=/bin:/usr/bin:/usr/sbin
+test -f /etc/aura-rescue-version
+rootdev=
+for node in /sys/class/block/*/uevent; do
+    if grep -qx PARTNAME=userdata "$node"; then rootdev=/dev/$(basename "$(dirname "$node")"); break; fi
+done
+check_root() {
+    test -b "$rootdev"
+    blkid "$rootdev" | grep -q 'TYPE="ext4"'
+    if grep -q "^$rootdev " /proc/mounts; then echo 'Unmount Kali before checking or repairing it.' >&2; exit 1; fi
+}
+case "${1:-help}" in
+    help)
+        printf '%s\n' 'Aura recovery: status | check | mount-readonly | unmount | repair --confirm | boot-kali | bootloader | poweroff'
+        ;;
+    status)
+        cat /etc/aura-rescue-version
+        uname -r
+        cat /proc/mounts
+        [ -z "$rootdev" ] || blkid "$rootdev"
+        for b in /sys/class/power_supply/*; do
+            [ "$(cat "$b/type" 2>/dev/null || true)" = Battery ] || continue
+            cat "$b/capacity" "$b/status" "$b/temp"
+        done
+        ;;
+    check) check_root; exec e2fsck -fn "$rootdev" ;;
+    mount-readonly)
+        check_root
+        mkdir -p /mnt/kali
+        mount -t ext4 -o ro,noload "$rootdev" /mnt/kali
+        ;;
+    unmount) umount /mnt/kali ;;
+    repair)
+        test "${2:-}" = --confirm || { echo 'Repair modifies filesystem metadata; use repair --confirm.' >&2; exit 2; }
+        check_root
+        exec e2fsck -p "$rootdev"
+        ;;
+    boot-kali)
+        qbootctl -s b
+        sync
+        reboot -f
+        ;;
+    bootloader) exec /bin/return-to-bootloader --bootloader ;;
+    poweroff) sync; poweroff -f ;;
+    *) echo 'Unknown recovery operation.' >&2; exit 2 ;;
+esac

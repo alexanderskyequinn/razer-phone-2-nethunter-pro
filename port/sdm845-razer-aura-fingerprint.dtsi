@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Standalone opt-in test include, not included by the installed board tree. */
+/ {
+	aura_fingerprint: fingerprint {
+		compatible = "razer,aura-fpc-resources";
+		reset-gpios = <&tlmm 95 GPIO_ACTIVE_LOW>;
+		irq-gpios = <&tlmm 121 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aura_fpc_reset &aura_fpc_irq>;
+		status = "disabled";
+	};
+};
+
+&tlmm {
+	aura_fpc_reset: fingerprint-reset-state {
+		pins = "gpio95";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+	aura_fpc_irq: fingerprint-irq-state {
+		pins = "gpio121";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+		input-enable;
+	};
+};

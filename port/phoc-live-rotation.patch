@@ -1,0 +1,16 @@
+--- a/src/output.c
++++ b/src/output.c
+@@ -725,7 +725,13 @@
+     configure_sent = phoc_layer_shell_arrange (self);
+     /* The arranging of the layer surfaces will kick of a transaction,
+      * dim screen until this finished to avoid flickering */
++    /* Keep orientation changes visible while layer clients resize.  On aura,
++     * hiding them behind the modeset shield can expose the full transaction
++     * timeout as a black screen.  Existing startup/lock shields stay intact.
++     */
+     if (configure_sent &&
++        !(g_strcmp0 (g_getenv ("PHOC_AURA_LIVE_ROTATION"), "1") == 0 &&
++          (event->state->committed & WLR_OUTPUT_STATE_TRANSFORM)) &&
+         !priv->modeset_shield &&
+         !phoc_output_shield_is_raised (priv->shield)) {
+       phoc_output_raise_shield (self, FALSE);

@@ -1,0 +1,16 @@
+{
+  "selection": "Everyday apps and Kali's full default toolkit",
+  "everyday": [
+    "firefox-esr", "nautilus", "loupe", "gnome-snapshot", "gnome-console",
+    "gnome-software", "gnome-calculator", "gnome-clocks", "gnome-text-editor",
+    "gnome-calendar", "gnome-contacts", "gnome-sound-recorder", "papers",
+    "showtime", "baobab", "gnome-system-monitor", "gnome-disk-utility", "gnome-maps", "phosh-mobile-settings"
+  ],
+  "kali": ["kali-linux-default", "kali-menu", "nethunter"],
+  "media_support": ["ffmpeg", "kali-archive-keyring"],
+  "notes": [
+    "Keep Phosh and the device-specific kernel/compositor integration.",
+    "Standard distribution applications; no replacement custom app launcher.",
+    "Installed security tools do not establish support for special hardware modes."
+  ]
+}

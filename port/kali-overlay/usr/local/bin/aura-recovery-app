@@ -1,0 +1,29 @@
+#!/usr/bin/python3
+"""Confirm entry to the separately installed RAM recovery."""
+import subprocess
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk
+
+dialog = Gtk.MessageDialog(
+    modal=True, message_type=Gtk.MessageType.QUESTION,
+    buttons=Gtk.ButtonsType.NONE, text='Restart into Recovery?')
+dialog.format_secondary_text(
+    'Save your work first. Recovery offers USB access and storage checks. '
+    'Use its Volume and Power buttons to return to Kali.')
+dialog.add_button('Cancel', Gtk.ResponseType.CANCEL)
+dialog.add_button('Restart', Gtk.ResponseType.OK)
+dialog.set_default_response(Gtk.ResponseType.CANCEL)
+response = dialog.run()
+dialog.destroy()
+if response == Gtk.ResponseType.OK:
+    result = subprocess.run(['/usr/bin/pkexec', '/usr/local/sbin/aura-enter-recovery'],
+                            capture_output=True, text=True)
+    if result.returncode not in (0, 126):
+        error = Gtk.MessageDialog(modal=True, message_type=Gtk.MessageType.ERROR,
+                                  buttons=Gtk.ButtonsType.CLOSE,
+                                  text='Recovery could not start')
+        error.format_secondary_text('The recovery check or restart failed. '
+                                    'Your Kali installation is still available.')
+        error.run()
+        error.destroy()

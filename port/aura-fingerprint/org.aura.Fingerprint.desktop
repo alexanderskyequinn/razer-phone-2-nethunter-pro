@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Fingerprint
+Comment=Enroll and test the power-button fingerprint sensor
+Exec=/usr/local/bin/aura-fingerprint-app
+Icon=org.aura.Fingerprint
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupNotify=true
+X-Purism-FormFactor=Workstation;Mobile;

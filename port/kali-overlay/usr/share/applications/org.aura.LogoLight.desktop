@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Logo Light
+Comment=Choose the Razer logo color or rainbow cycle
+Exec=/usr/local/bin/aura-logo-app
+Icon=preferences-color
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupNotify=true
+X-Purism-FormFactor=Workstation;Mobile;

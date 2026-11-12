@@ -1,0 +1,5 @@
+#!/bin/sh
+case "$1:$2" in
+    wlan0:up|wlan0:dhcp4-change|wlan0:down)
+        /usr/local/sbin/aura-wifi-ssh ;;
+esac

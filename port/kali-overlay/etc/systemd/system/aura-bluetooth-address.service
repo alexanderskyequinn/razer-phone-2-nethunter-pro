@@ -1,0 +1,14 @@
+[Unit]
+Description=Restore this Razer phone's factory Bluetooth address
+After=bluetooth.service
+Wants=bluetooth.service
+ConditionPathExists=/etc/aura/bluetooth-address
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aura-bluetooth-address
+TimeoutStartSec=60
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

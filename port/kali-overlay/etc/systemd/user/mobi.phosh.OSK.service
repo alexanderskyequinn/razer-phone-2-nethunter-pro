@@ -1,0 +1,13 @@
+# Local override for squeekboard 1.43.1-2+b1's malformed service alternative.
+[Unit]
+Description=Squeekboard on-screen keyboard for Phosh
+CollectMode=inactive-or-failed
+After=gnome-session-initialized.target
+
+[Service]
+Slice=session.slice
+Type=simple
+BusName=sm.puri.OSK0
+ExecStart=/usr/bin/squeekboard
+Restart=on-failure
+TimeoutStopSec=5

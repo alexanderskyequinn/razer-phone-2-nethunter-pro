@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+export LD_LIBRARY_PATH=/opt/aura-camera/lib
+export LIBCAMERA_IPA_MODULE_PATH=/opt/aura-camera/lib/libcamera/ipa
+export LIBCAMERA_IPA_CONFIG_PATH=/opt/aura-camera/share/libcamera/ipa
+export LIBCAMERA_IPA_PROXY_PATH=/opt/aura-camera/libexec/libcamera
+export SDL_VIDEODRIVER=wayland
+export AURA_CAMERA_PORTRAIT=1
+exec /opt/aura-camera/bin/cam -c 1 -s width=800,height=600 --capture --sdl

@@ -1,0 +1,21 @@
+--- a/src/ipa/libipa/camera_sensor_helper.cpp
++++ b/src/ipa/libipa/camera_sensor_helper.cpp
+@@ -618,6 +618,18 @@
+ REGISTER_CAMERA_SENSOR_HELPER("imx335", CameraSensorHelperImx335)
+ 
+ // Razer stock helper at 0xbe8/0xc60 uses 512/(512-code), capped at code 480.
++// IMX351: stock black level64 in RAW10; gain1024/(1024-code).
++class CameraSensorHelperImx351 : public CameraSensorHelper
++{
++public:
++    CameraSensorHelperImx351()
++    {
++        blackLevel_ = 4096;
++        gain_ = AnalogueGainLinear{ 0, 1024, -1, 1024 };
++    }
++};
++REGISTER_CAMERA_SENSOR_HELPER("imx351", CameraSensorHelperImx351)
++
+ class CameraSensorHelperImx363 : public CameraSensorHelper
+ {
+ public:

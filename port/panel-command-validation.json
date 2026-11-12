@@ -1,0 +1,602 @@
+{
+  "on": {
+    "sha256": "f44abfce36aa7a339a642080bd5c88657c3eb08210fe9e906008184bc9ab068b",
+    "commands": [
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ffd0"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "7540"
+      },
+      {
+        "type": 21,
+        "delay_ms": 10,
+        "payload": "f140"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff10"
+      },
+      {
+        "type": 57,
+        "delay_ms": 10,
+        "payload": "2c0102040810"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ffd0"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "7500"
+      },
+      {
+        "type": 21,
+        "delay_ms": 10,
+        "payload": "f100"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff10"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ba03"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "bc00"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "c083"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "c1ab2800080200026800d5000a0db70989"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "c210f0"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "d500"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "d600"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "de00"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "e100"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "e501"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "bb10"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "f671"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "f780"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "be00100010"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "3500"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff20"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "5d00"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "5e14"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "5feb"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "8702"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "9600"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "976d"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "986d"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ae00"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff21"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "e024"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "e1420a86531b970a86421b9753"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "e286420a97531b0a86421b9753"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff20"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b0000100210043005b00720083009600a5"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b100b200e10109014b018001d302160219"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b20258029b02c402fb031f034b035b0369"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b3037c039303b703cf03e103e60000"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b400c000ca00d500e000ea00f400fd0106"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b5010f012f014b017b01a601ec0228022a"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b6026502a602ce03040327035103620371"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b70386039e03b603cd03df03e600bf"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b80112011801200127012e0135013b0142"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b9014801610177019e01c2020002370239"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "ba027102b002d903110337035c036e0381"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "bb039d03b603ca03da03e403e60111"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff21"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b0000100210043005b00720083009600a5"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b100b200e10109014b018001d302160219"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b20258029b02c402fb031f034b035b0369"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b3037c039303b703cf03e103e60000"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b400c000ca00d500e000ea00f400fd0106"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b5010f012f014b017b01a601ec0228022a"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b6026502a602ce03040327035103620371"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b70386039e03b603cd03df03e600bf"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b80112011801200127012e0135013b0142"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "b9014801610177019e01c2020002370239"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "ba027102b002d903110337035c036e0381"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "bb039d03b603ca03da03e403e60111"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff24"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1400"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1510"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1600"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1710"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "b400"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "b630"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1802"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1b00"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1c0e"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1d00"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1e10"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "1f00"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "2200"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "230e"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "240f"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "25a8"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff26"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "6000"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "6200"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "4000"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff28"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "9102"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ffe0"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "4881"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "8e09"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fff0"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "3320"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "3435"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff23"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "0622"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "ff10"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 57,
+        "delay_ms": 0,
+        "payload": "510fff"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "5503"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "532c"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "b104"
+      },
+      {
+        "type": 5,
+        "delay_ms": 120,
+        "payload": "11"
+      },
+      {
+        "type": 5,
+        "delay_ms": 0,
+        "payload": "29"
+      }
+    ]
+  },
+  "off": {
+    "sha256": "b1890468338f9a0d7cebad52e394b3268a9ad618af50e710a890735a7ea59f7b",
+    "commands": [
+      {
+        "type": 41,
+        "delay_ms": 0,
+        "payload": "ff10"
+      },
+      {
+        "type": 21,
+        "delay_ms": 0,
+        "payload": "fb01"
+      },
+      {
+        "type": 41,
+        "delay_ms": 0,
+        "payload": "bc00"
+      },
+      {
+        "type": 5,
+        "delay_ms": 34,
+        "payload": "28"
+      },
+      {
+        "type": 5,
+        "delay_ms": 180,
+        "payload": "10"
+      }
+    ]
+  }
+}

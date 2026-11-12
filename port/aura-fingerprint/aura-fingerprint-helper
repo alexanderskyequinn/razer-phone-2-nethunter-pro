@@ -1,0 +1,146 @@
+#!/usr/bin/python3
+"""Fixed root-only operations for the local enrollment UI; no auth integration."""
+import fcntl
+import os
+from pathlib import Path
+import queue
+import resource
+import signal
+import stat
+import subprocess
+import sys
+import threading
+import time
+
+BASE = Path('/var/lib/aura/fpc-test-store')
+DB = BASE / 'aura-fpc-test.db'
+BINARY = '/usr/local/libexec/aura-fpc-bio'
+diagnostic = None
+log_bytes = 0
+
+
+def emit(text):
+    global log_bytes
+    if diagnostic is not None and log_bytes < 262144:
+        diagnostic.write(text + '\n')
+        diagnostic.flush()
+        log_bytes += len(text) + 1
+    try:
+        print(text, flush=True)
+    except BrokenPipeError:
+        pass
+
+
+def main():
+    global diagnostic
+    if os.geteuid() or len(sys.argv) != 2 or sys.argv[1] not in ('enroll', 'verify', 'authorize'):
+        return 2
+    if Path('/etc/aura-install-id').read_text().strip() != 'REPLACE_WITH_YOUR_INSTALL_ID':
+        return 2
+    os.umask(0o077)
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    lock = os.open('/run/aura-fpc-test.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        emit('UI_ERROR: Another fingerprint test is running. Try again shortly.')
+        return 1
+    log_fd = os.open('/var/lib/aura/fingerprint-last-test.log', os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    diagnostic = os.fdopen(log_fd, 'w')
+    emit('Operation: ' + sys.argv[1])
+    metadata = BASE.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid or metadata.st_mode & 0o077:
+        emit('UI_ERROR: Private fingerprint storage permissions need repair.')
+        return 1
+    mode = sys.argv[1]
+    if mode == 'enroll' and os.path.lexists(DB):
+        emit('UI_ERROR: A test fingerprint is already saved. Use Test fingerprint.')
+        return 1
+    if mode == 'verify' and not DB.exists():
+        emit('UI_ERROR: Enroll a fingerprint first.')
+        return 1
+    pin = None
+    if mode in ('enroll', 'authorize'):
+        pin = sys.stdin.readline(80).rstrip('\n')
+        if not pin.isascii() or not pin.isdigit() or not 4 <= len(pin) <= 64:
+            emit('UI_ERROR: Enter a numeric PIN with 4–64 digits.')
+            return 1
+    # The on-demand listener is never enabled at boot by this app.
+    ready = subprocess.run(['/usr/bin/systemctl', 'start', 'aura-fingerprint-storage.service'],
+                           capture_output=True, timeout=30)
+    if ready.returncode:
+        emit('UI_ERROR: Fingerprint storage could not start.')
+        return 1
+    events = queue.Queue()
+    operation = {'enroll': '--authorized-enroll', 'verify': '--verify-test', 'authorize': '--authorization-test'}[mode]
+    child = subprocess.Popen([BINARY, operation],
+                             stdin=subprocess.PIPE if pin is not None else subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, bufsize=1)
+    if pin is not None:
+        child.stdin.write(pin + '\n')
+        child.stdin.close()
+        pin = None
+
+    def lines():
+        for line in child.stdout:
+            events.put(('line', line.rstrip()))
+        events.put(('end', None))
+
+    def cancellation():
+        # EOF also cancels if the UI disappears. Input never changes commands.
+        sys.stdin.readline()
+        events.put(('cancel', None))
+
+    threading.Thread(target=lines, daemon=True).start()
+    threading.Thread(target=cancellation, daemon=True).start()
+    signal.signal(signal.SIGTERM, lambda *_: events.put(('cancel', None)))
+    signal.signal(signal.SIGINT, lambda *_: events.put(('cancel', None)))
+    deadline = time.monotonic() + (240 if mode == 'enroll' else 90)
+    cancelled = False
+    ended = False
+    while not ended:
+        try:
+            kind, value = events.get(timeout=0.2)
+        except queue.Empty:
+            kind, value = 'tick', None
+        if kind == 'line':
+            emit(value)
+        elif kind == 'end':
+            ended = True
+        if (kind == 'cancel' or time.monotonic() >= deadline) and not cancelled:
+            cancelled = True
+            child.terminate()
+            deadline = time.monotonic() + 8
+        elif cancelled and time.monotonic() >= deadline:
+            child.kill()
+            break
+    code = child.wait(timeout=10)
+    if cancelled:
+        emit('UI_CANCELLED')
+        return 1
+    if mode == 'enroll' and code == 0:
+        # A saved file alone is insufficient: reload it in a new TA session.
+        check = subprocess.run([BINARY, '--check-database'], stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, timeout=30)
+        if check.returncode:
+            emit('UI_ERROR: The saved fingerprint could not be reloaded. Unlock is not enabled.')
+            return 1
+        emit('UI_ENROLLED')
+    elif mode == 'authorize' and code == 0:
+        emit('UI_AUTHORIZED')
+    elif mode == 'verify' and code == 0:
+        emit('UI_MATCH')
+    elif mode == 'verify' and code == 3:
+        emit('UI_NO_MATCH')
+    elif code:
+        emit('UI_ERROR: Secure enrollment setup did not finish. Leave this message open for diagnosis.' if mode == 'authorize' else
+             'UI_ERROR: The test could not finish. Leave this message open for diagnosis.')
+    return code
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception:
+        emit('UI_ERROR: Fingerprint service needs attention. No unlock was performed.')
+        sys.exit(1)

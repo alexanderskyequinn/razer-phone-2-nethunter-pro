@@ -1,0 +1,69 @@
+#!/bin/sh
+export PATH=/bin:/usr/bin:/usr/sbin
+export HOME=/root
+/bin/busybox --install -s /bin
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /run/sshd /sys/kernel/config
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /run
+mkdir -p /run/sshd
+exec >/dev/kmsg 2>&1
+echo 'AURA_RESCUE: RAM-only recovery; no phone filesystem mounted'
+mdev -s
+# qbootctl needs partition labels normally supplied by udev in Kali.
+mkdir -p /dev/disk/by-partlabel
+for entry in /sys/class/block/*/uevent; do
+    label=$(sed -n 's/^PARTNAME=//p' "$entry")
+    case "$label" in ''|*[!A-Za-z0-9_-]*) continue;; esac
+    node=$(basename "$(dirname "$entry")")
+    ln -sf "/dev/$node" "/dev/disk/by-partlabel/$label"
+done
+chvt 1 || true
+printf '\033[2J\033[H\n\n  AURA RECOVERY\n\n  Running from RAM.\n  Your Kali filesystem is not mounted.\n\n  Connect USB to your computer.\n  Key-only SSH: 192.0.2.1 port 22\n\n  Use aura-rescue help after connecting.\n' >/dev/tty1
+
+/bin/aura-rescue-power &
+/bin/aura-rescue-screen >/run/screen.log 2>&1 &
+# Only this development image has a bounded unattended test timer.
+if [ -f /etc/aura-rescue-test-seconds ]; then
+    ( sleep "$(cat /etc/aura-rescue-test-seconds)"; /bin/aura-rescue boot-kali ) &
+fi
+
+# Portable recovery has no network listeners or authorized login keys.
+if [ ! -f /etc/aura-rescue-remote-enabled ]; then
+    echo 'AURA_RESCUE_READY: local menu only; remote access disabled'
+    while :; do sleep 10; done
+fi
+/bin/aura-rescue-usb > /run/usb.log 2>&1 &
+# Do not let an unavailable DHCP daemon hold up the rescue shell.
+for i in $(seq 1 40); do
+    ip address show dev usb0 2>/dev/null | grep -q '192.0.2.1' && break
+    sleep 1
+done
+mkdir -p /run/www
+# Diagnostic endpoint on the point-to-point USB interface only. No CGI,
+# private keys, saved fingerprints or installed filesystem are exposed.
+(
+    while :; do
+        {
+            cat /etc/aura-rescue-version
+            cat /proc/uptime
+            cat /proc/sys/kernel/random/entropy_avail
+            ps
+            cat /run/usb.log /run/keygen.log /run/sshd.log /run/screen.log 2>/dev/null
+            dmesg | tail -60
+        } >/run/www/status.txt.tmp
+        mv /run/www/status.txt.tmp /run/www/status.txt
+        sleep 3
+    done
+) &
+/bin/busybox httpd -p 192.0.2.1:80 -h /run/www
+# New keys for every RAM-only boot; none are copied from the installed OS.
+ssh-keygen -q -t ed25519 -N '' -f /run/ssh_host_ed25519_key >/run/keygen.log 2>&1
+if /usr/sbin/sshd -t -f /etc/ssh/sshd_config && /usr/sbin/sshd -f /etc/ssh/sshd_config -E /run/sshd.log; then
+    echo 'AURA_RESCUE_READY'
+else
+    echo 'AURA_RESCUE_SSH_FAILED'
+fi
+while :; do sleep 10; done

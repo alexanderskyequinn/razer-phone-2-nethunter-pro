@@ -1,0 +1,5 @@
+#!/bin/sh
+if [ ! -f /var/lib/aura/setup-complete ]; then
+    exec /usr/libexec/phosh --unlocked
+fi
+exec /usr/libexec/phosh

@@ -1,0 +1,264 @@
+--- a/meson.build
++++ b/meson.build
+@@ -115,6 +115,7 @@
+ drivers = get_option('drivers').split(',')
+ 
+ drivers_info = {
++    'aura_fpc': { 'helper': ['udev'], 'optional': true },
+     'upektc_img': {},
+     'vfs5011': { 'endian_dependent': true },
+     'vfs7552': {},
+--- a/libfprint/meson.build
++++ b/libfprint/meson.build
+@@ -88,6 +88,7 @@
+ ]
+ 
+ driver_sources = {
++    'aura_fpc': files('drivers/aura_fpc.c'),
+     'upekts' : files(
+         'drivers/upekts.c',
+         'drivers/upek_proto.c',
+--- a/libfprint/fpi-device.h
++++ b/libfprint/fpi-device.h
+@@ -34,6 +34,7 @@
+ typedef enum {
+   FPI_DEVICE_UDEV_SUBTYPE_SPIDEV = 1 << 0,
+   FPI_DEVICE_UDEV_SUBTYPE_HIDRAW = 1 << 1,
++  FPI_DEVICE_UDEV_SUBTYPE_PLATFORM = 1 << 2,
+ } FpiDeviceUdevSubtypeFlags;
+ 
+ /**
+@@ -66,6 +67,8 @@
+     {
+       FpiDeviceUdevSubtypeFlags udev_types;
+       const gchar              *spi_acpi_id;
++      const gchar              *platform_compatible;
++      const gchar              *platform_driver;
+       struct
+       {
+         guint pid;
+--- a/libfprint/fp-device-private.h
++++ b/libfprint/fp-device-private.h
+@@ -49,6 +49,7 @@
+   {
+     gchar *spidev_path;
+     gchar *hidraw_path;
++    gchar *platform_path;
+   } udev_data;
+ 
+   gboolean        is_removed;
+--- a/libfprint/fp-device.c
++++ b/libfprint/fp-device.c
+@@ -53,6 +53,7 @@
+   PROP_FPI_USB_DEVICE,
+   PROP_FPI_UDEV_DATA_SPIDEV,
+   PROP_FPI_UDEV_DATA_HIDRAW,
++  PROP_FPI_UDEV_DATA_PLATFORM,
+   PROP_FPI_DRIVER_DATA,
+   N_PROPS
+ };
+@@ -237,6 +238,7 @@
+   g_clear_pointer (&priv->virtual_env, g_free);
+   g_clear_pointer (&priv->udev_data.spidev_path, g_free);
+   g_clear_pointer (&priv->udev_data.hidraw_path, g_free);
++  g_clear_pointer (&priv->udev_data.platform_path, g_free);
+ 
+   G_OBJECT_CLASS (fp_device_parent_class)->finalize (object);
+ }
+@@ -307,6 +309,13 @@
+         g_value_set_string (value, NULL);
+       break;
+ 
++    case PROP_FPI_UDEV_DATA_PLATFORM:
++      if (cls->type == FP_DEVICE_TYPE_UDEV)
++        g_value_set_string (value, priv->udev_data.platform_path);
++      else
++        g_value_set_string (value, NULL);
++      break;
++
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+     }
+@@ -349,6 +358,13 @@
+     case PROP_FPI_UDEV_DATA_HIDRAW:
+       if (cls->type == FP_DEVICE_TYPE_UDEV)
+         priv->udev_data.hidraw_path = g_value_dup_string (value);
++      else
++        g_assert (g_value_get_string (value) == NULL);
++      break;
++
++    case PROP_FPI_UDEV_DATA_PLATFORM:
++      if (cls->type == FP_DEVICE_TYPE_UDEV)
++        priv->udev_data.platform_path = g_value_dup_string (value);
+       else
+         g_assert (g_value_get_string (value) == NULL);
+       break;
+@@ -591,6 +607,11 @@
+    *
+    * Stability: private
+    */
++  properties[PROP_FPI_UDEV_DATA_PLATFORM] =
++    g_param_spec_string ("fpi-udev-data-platform", "Udev data: platform sysfs path",
++                         "Private: Platform resource device path", NULL,
++                         G_PARAM_STATIC_STRINGS | G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
++
+   properties[PROP_FPI_DRIVER_DATA] =
+     g_param_spec_uint64 ("fpi-driver-data",
+                          "Driver Data",
+--- a/libfprint/fpi-device.c
++++ b/libfprint/fpi-device.c
+@@ -515,6 +515,9 @@
+ 
+   switch (subtype)
+     {
++    case FPI_DEVICE_UDEV_SUBTYPE_PLATFORM:
++      return priv->udev_data.platform_path;
++
+     case FPI_DEVICE_UDEV_SUBTYPE_HIDRAW:
+       return priv->udev_data.hidraw_path;
+ 
+--- a/libfprint/fp-context.c
++++ b/libfprint/fp-context.c
+@@ -479,6 +479,7 @@
+ 
+     g_autoptr(GList) spidev_devices = g_udev_client_query_by_subsystem (udev_client, "spidev");
+     g_autoptr(GList) hidraw_devices = g_udev_client_query_by_subsystem (udev_client, "hidraw");
++    g_autoptr(GList) platform_devices = g_udev_client_query_by_subsystem (udev_client, "platform");
+ 
+     /* for each potential driver, try to match all requested resources. */
+     for (i = 0; i < priv->drivers->len; i++)
+@@ -492,8 +493,34 @@
+ 
+         for (entry = cls->id_table; entry->udev_types; entry++)
+           {
+-            GList *matched_spidev = NULL, *matched_hidraw = NULL;
+-
++            GList *matched_spidev = NULL, *matched_hidraw = NULL, *matched_platform = NULL;
++
++            if (entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_PLATFORM)
++              {
++                /* Require an exact DT compatible and the expected bound driver.
++                 * A similarly named node or unrelated TEE device is insufficient. */
++                if (!entry->platform_compatible || !entry->platform_driver)
++                  continue;
++                for (matched_platform = platform_devices; matched_platform; matched_platform = matched_platform->next)
++                  {
++                    GUdevDevice *candidate = matched_platform->data;
++                    gint count = g_udev_device_get_property_as_int (candidate, "OF_COMPATIBLE_N");
++                    gboolean matches = FALSE;
++                    if (count <= 0 || count > 64 ||
++                        g_strcmp0 (g_udev_device_get_driver (candidate), entry->platform_driver))
++                      continue;
++                    for (gint n = 0; n < count; n++)
++                      {
++                        g_autofree gchar *key = g_strdup_printf ("OF_COMPATIBLE_%d", n);
++                        if (!g_strcmp0 (g_udev_device_get_property (candidate, key), entry->platform_compatible))
++                          { matches = TRUE; break; }
++                      }
++                    if (matches && g_udev_device_get_sysfs_path (candidate))
++                      break;
++                  }
++                if (!matched_platform)
++                  continue;
++              }
+             if (entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_SPIDEV)
+               {
+                 for (matched_spidev = spidev_devices; matched_spidev; matched_spidev = matched_spidev->next)
+@@ -539,8 +566,14 @@
+                                         "fpi-driver-data", entry->driver_data,
+                                         "fpi-udev-data-spidev", (matched_spidev ? g_udev_device_get_device_file (matched_spidev->data) : NULL),
+                                         "fpi-udev-data-hidraw", (matched_hidraw ? g_udev_device_get_device_file (matched_hidraw->data) : NULL),
++                                        "fpi-udev-data-platform", (matched_platform ? g_udev_device_get_sysfs_path (matched_platform->data) : NULL),
+                                         NULL);
+             /* remove entries from list to avoid conflicts */
++            if (matched_platform)
++              {
++                g_object_unref (matched_platform->data);
++                platform_devices = g_list_delete_link (platform_devices, matched_platform);
++              }
+             if (matched_spidev)
+               {
+                 g_object_unref (matched_spidev->data);
+@@ -557,6 +590,7 @@
+     /* free all unused elemnts in both lists */
+     g_list_foreach (spidev_devices, (GFunc) g_object_unref, NULL);
+     g_list_foreach (hidraw_devices, (GFunc) g_object_unref, NULL);
++    g_list_foreach (platform_devices, (GFunc) g_object_unref, NULL);
+   }
+ #endif
+ 
+--- a/libfprint/fprint-list-metainfo.c
++++ b/libfprint/fprint-list-metainfo.c
+@@ -87,6 +87,15 @@
+       GType driver = g_array_index (drivers, GType, i);
+       g_autoptr(FpDeviceClass) cls = g_type_class_ref (driver);
+ 
++      if (cls->type == FP_DEVICE_TYPE_UDEV)
++        {
++          for (const FpIdEntry *entry = cls->id_table; entry->udev_types; entry++)
++            if ((entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_PLATFORM) && entry->platform_compatible)
++              {
++                g_autofree gchar *compatible = g_markup_escape_text (entry->platform_compatible, -1);
++                g_string_append_printf (provided_modules, "    <modalias>of:N*T*C%s*</modalias>\n", compatible);
++              }
++        }
+       if (cls->type != FP_DEVICE_TYPE_USB)
+         continue;
+ 
+--- a/libfprint/drivers/aura_fpc.c
++++ b/libfprint/drivers/aura_fpc.c
+@@ -0,0 +1,54 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * Discovery-only bring-up for the real platform resource device. No simulated
++ * biometric result, enrollment, private template access or authentication.
++ */
++#include "drivers_api.h"
++
++typedef struct _FpiDeviceAuraFpc { FpDevice parent; } FpiDeviceAuraFpc;
++typedef struct _FpiDeviceAuraFpcClass { FpDeviceClass parent; } FpiDeviceAuraFpcClass;
++GType fpi_device_aura_fpc_get_type (void);
++G_DEFINE_TYPE (FpiDeviceAuraFpc, fpi_device_aura_fpc, FP_TYPE_DEVICE)
++
++static const FpIdEntry ids[] = {
++  { .udev_types = FPI_DEVICE_UDEV_SUBTYPE_PLATFORM,
++    .platform_compatible = "razer,aura-fpc-resources",
++    .platform_driver = "aura-fpc-resources" },
++  { .udev_types = 0 }
++};
++
++static void probe (FpDevice *device)
++{
++  const char *path = fpi_device_get_udev_data (device, FPI_DEVICE_UDEV_SUBTYPE_PLATFORM);
++  if (!path || !g_path_is_absolute (path)) {
++    fpi_device_probe_complete (device, NULL, NULL,
++                              fpi_device_error_new (FP_DEVICE_ERROR_NOT_SUPPORTED));
++    return;
++  }
++  /* The secure firmware can match, but this discovery stage exposes no usable
++   * biometric operation until account authorization and storage are connected. */
++  fpi_device_update_features (device, FP_DEVICE_FEATURE_VERIFY, FP_DEVICE_FEATURE_NONE);
++  fpi_device_probe_complete (device, "aura-fpc-qsee-v1",
++                            "Razer Phone 2 fingerprint sensor (integration in progress)", NULL);
++}
++
++static void open_device (FpDevice *device)
++{
++  fpi_device_open_complete (device, fpi_device_error_new_msg (
++    FP_DEVICE_ERROR_NOT_SUPPORTED,
++    "Discovery is implemented; secure multi-user enrollment and verification are not yet connected"));
++}
++
++static void fpi_device_aura_fpc_init (FpiDeviceAuraFpc *self) { (void) self; }
++static void fpi_device_aura_fpc_class_init (FpiDeviceAuraFpcClass *klass)
++{
++  FpDeviceClass *device = FP_DEVICE_CLASS (klass);
++  device->id = "aura_fpc";
++  device->full_name = "Razer Phone 2 Qualcomm TEE fingerprint sensor";
++  device->type = FP_DEVICE_TYPE_UDEV;
++  device->id_table = ids;
++  device->scan_type = FP_SCAN_TYPE_PRESS;
++  device->nr_enroll_stages = 0;
++  device->probe = probe;
++  device->open = open_device;
++  device->features = FP_DEVICE_FEATURE_VERIFY;
++}

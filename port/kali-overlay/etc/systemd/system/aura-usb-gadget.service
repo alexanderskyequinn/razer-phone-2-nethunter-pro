@@ -1,0 +1,11 @@
+[Unit]
+Description=Razer native Linux USB access
+Before=aura-usb-dhcp.service ssh.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aura-usb-gadget
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

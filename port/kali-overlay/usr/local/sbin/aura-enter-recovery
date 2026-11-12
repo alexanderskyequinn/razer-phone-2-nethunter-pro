@@ -1,0 +1,13 @@
+#!/bin/sh
+# Fixed operation: verify the installed rescue image, select A, reboot.
+set -eu
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+test "$#" = 0
+test "$(id -u)" = 0
+tr '\000' '\n' </proc/device-tree/compatible | grep -qx 'razer,aura'
+test -f /etc/aura-recovery.sha256
+cd /
+sha256sum -c /etc/aura-recovery.sha256
+/usr/local/libexec/aura-qbootctl -s a
+sync
+systemctl reboot

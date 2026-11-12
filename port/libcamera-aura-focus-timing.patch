@@ -1,0 +1,76 @@
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -39,6 +39,8 @@
+ #include "libcamera/internal/dma_buf_allocator.h"
+ #include "aura_focus_search.h"
+ #include "aura_focus_scene.h"
++#include "aura_focus_timing.h"
++#include <chrono>
+ #include "libcamera/internal/camera_manager.h"
+ #include "libcamera/internal/camera_sensor.h"
+ #include "libcamera/internal/camera_sensor_properties.h"
+@@ -375,7 +377,8 @@
+     int auraFocusLow_ = 50, auraFocusHigh_ = 800;
+     int auraFocusState_ = controls::AfStateIdle;
+     unsigned int auraWait_ = 20, auraSamples_ = 0, auraCooldown_ = 0;
+-    unsigned int auraBadFrames_ = 0;
++    unsigned int auraBadFrames_ = 0, auraFramesSinceMove_ = 0;
++    uint64_t auraMovedNs_ = 0, auraScanStartedNs_ = 0;
+     double auraScoreSum_ = 0, auraReference_ = 0, auraReferenceMean_ = 0;
+     bool auraPending_ = true;
+     AuraFocusSearch auraFocus_;
+@@ -1082,7 +1085,11 @@
+         return false;
+     }
+     auraFocusPosition_ = std::clamp(position, auraFocusLow_, auraFocusHigh_);
+-    auraWait_ = 8; // Existing queued frames plus mechanical settling.
++    // AURA timestamp-based settling: exclude stale queued frames.
++    auraWait_ = 0;
++    auraMovedNs_ = std::chrono::duration_cast<std::chrono::nanoseconds>(
++        std::chrono::steady_clock::now().time_since_epoch()).count();
++    auraFramesSinceMove_ = 0;
+     auraSamples_ = 0;
+     auraScoreSum_ = 0;
+     return true;
+@@ -1133,8 +1140,17 @@
+     if (auraPending_) {
+         auraPending_ = false;
+         auraFocusState_ = controls::AfStateScanning;
++        auraScanStartedNs_ = std::chrono::duration_cast<std::chrono::nanoseconds>(
++            std::chrono::steady_clock::now().time_since_epoch()).count();
+         auraMove(auraFocus_.start(auraFocusPosition_));
+         return;
++    }
++    if (auraMovedNs_) {
++        const uint64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
++            std::chrono::steady_clock::now().time_since_epoch()).count();
++        if (!auraFocusFrameSettled(buffer->metadata().timestamp, now, auraMovedNs_, ++auraFramesSinceMove_))
++            return;
++        auraMovedNs_ = 0;
+     }
+     if (auraCooldown_) { --auraCooldown_; return; }
+     if (cfg.size.width < 64 || cfg.size.height < 64 || cfg.stride < cfg.size.width * 4)
+@@ -1176,10 +1192,12 @@
+                 controls::AfStateFocused : controls::AfStateFailed;
+             auraReference_ = auraFocus_.score();
+             auraReferenceMean_ = mean / count;
+-            auraCooldown_ = 120;
++            auraCooldown_ = 30;
+             auraBadFrames_ = 0;
+             LOG(SimplePipeline, Info) << "AURA focus result position=" << auraFocusPosition_
+-                << " score=" << auraReference_ << " state=" << auraFocusState_;
++                << " score=" << auraReference_ << " state=" << auraFocusState_
++                << " duration_ms=" << (std::chrono::duration_cast<std::chrono::nanoseconds>(
++                    std::chrono::steady_clock::now().time_since_epoch()).count() - auraScanStartedNs_) / 1000000;
+         }
+     } else if (auraFocusMode_ == controls::AfModeContinuous) {
+         // Refocus after a sustained contrast loss, not every small fluctuation.
+@@ -1188,7 +1206,7 @@
+             ++auraBadFrames_;
+         else
+             auraBadFrames_ = 0;
+-        if (auraBadFrames_ >= 20) {
++        if (auraBadFrames_ >= 8) {
+             auraPending_ = true;
+             auraBadFrames_ = 0;
+         }

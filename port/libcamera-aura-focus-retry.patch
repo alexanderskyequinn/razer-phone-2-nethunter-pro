@@ -1,0 +1,37 @@
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -38,6 +38,7 @@
+ #include "libcamera/internal/mapped_framebuffer.h"
+ #include "libcamera/internal/dma_buf_allocator.h"
+ #include "aura_focus_search.h"
++#include "aura_focus_scene.h"
+ #include "libcamera/internal/camera_manager.h"
+ #include "libcamera/internal/camera_sensor.h"
+ #include "libcamera/internal/camera_sensor_properties.h"
+@@ -375,7 +376,7 @@
+     int auraFocusState_ = controls::AfStateIdle;
+     unsigned int auraWait_ = 20, auraSamples_ = 0, auraCooldown_ = 0;
+     unsigned int auraBadFrames_ = 0;
+-    double auraScoreSum_ = 0, auraReference_ = 0;
++    double auraScoreSum_ = 0, auraReference_ = 0, auraReferenceMean_ = 0;
+     bool auraPending_ = true;
+     AuraFocusSearch auraFocus_;
+     void auraFocusControls(const ControlList &controls);
+@@ -1174,6 +1175,7 @@
+             auraFocusState_ = auraFocus_.state() == AuraFocusSearch::State::Focused ?
+                 controls::AfStateFocused : controls::AfStateFailed;
+             auraReference_ = auraFocus_.score();
++            auraReferenceMean_ = mean / count;
+             auraCooldown_ = 120;
+             auraBadFrames_ = 0;
+             LOG(SimplePipeline, Info) << "AURA focus result position=" << auraFocusPosition_
+@@ -1181,7 +1183,8 @@
+         }
+     } else if (auraFocusMode_ == controls::AfModeContinuous) {
+         // Refocus after a sustained contrast loss, not every small fluctuation.
+-        if (score < auraReference_ * 0.65 || auraFocusState_ == controls::AfStateFailed)
++        if (auraFocusSceneNeedsRetry(auraFocusState_ == controls::AfStateFailed,
++                                    score, mean / count, auraReference_, auraReferenceMean_))
+             ++auraBadFrames_;
+         else
+             auraBadFrames_ = 0;

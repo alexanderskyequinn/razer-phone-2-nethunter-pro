@@ -1,0 +1,139 @@
+#!/usr/bin/python3
+"""Control the Razer logo; colors pause with the screen and default to off at boot."""
+import argparse
+import colorsys
+import fcntl
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import time
+
+# Individually observed colors; green channels 1/2 have ambiguous spatial mapping.
+GROUPS = ((6, 7, 8), (1, 2, 4), (0, 3, 5))
+PRESETS = {'off': (0, 0, 0), 'red': (64, 0, 0), 'green': (0, 64, 0),
+           'blue': (0, 0, 64), 'white': (64, 64, 64)}
+LEDS = [Path(f'/sys/class/leds/aura:logo{i}/brightness') for i in range(9)]
+BACKLIGHT = Path('/sys/class/backlight/panel-backlight')
+STATE = Path('/run/aura-logo/color.json')
+UNIT = 'aura-logo.service'
+
+def set_rgb(rgb):
+    for value, channels in zip(rgb, GROUPS):
+        for channel in channels:
+            LEDS[channel].write_text(f'{value}\n')
+
+def off():
+    for led in LEDS:
+        try:
+            led.write_text('0\n')
+        except OSError:
+            pass
+
+def screen_on():
+    # Unreadable display state fails dark rather than leaving the logo lit.
+    try:
+        return (int((BACKLIGHT/'bl_power').read_text()) == 0
+                and int((BACKLIGHT/'actual_brightness').read_text()) > 0)
+    except (OSError, ValueError):
+        return False
+
+def validate_leds():
+    for led in LEDS:
+        if not led.exists():
+            raise OSError('Logo driver is not available')
+        if any(int((led.parent/name).read_text()) != 80
+               for name in ('led_current', 'max_current')):
+            raise ValueError('Unexpected LED current configuration')
+
+def animate():
+    running = True
+    def stop(signum, frame):
+        nonlocal running
+        running = False
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        state = json.loads(STATE.read_text())
+        mode, rgb = state['mode'], tuple(state['rgb'])
+        if mode not in ('solid', 'rainbow') or len(rgb) != 3 or not all(
+                type(v) is int and 0 <= v <= 255 for v in rgb):
+            raise ValueError('Invalid logo state')
+        validate_leds()
+        previous = None
+        phase = 0.0
+        last = time.monotonic()
+        was_visible = False
+        while running:
+            now = time.monotonic()
+            visible = screen_on()
+            if mode == 'rainbow' and visible and was_visible:
+                phase = (phase + (now-last)/8.0) % 1.0
+            last, was_visible = now, visible
+            if not visible:
+                target = (0, 0, 0)
+            elif mode == 'rainbow':
+                target = tuple(round(v*64) for v in colorsys.hsv_to_rgb(phase, 1.0, 1.0))
+            else:
+                target = rgb
+            if target != previous:
+                set_rgb(target)
+                previous = target
+            time.sleep(0.05 if visible and mode == 'rainbow' else 0.15)
+    finally:
+        off()
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__,
+        epilog='Examples: sudo aura-logo rainbow; sudo aura-logo green; sudo aura-logo 32 0 64; sudo aura-logo off. Named colors and rainbow use quarter brightness.')
+    parser.add_argument('color', nargs='*', help='rainbow, off, red, green, blue, white, or three RGB values (0..255)')
+    parser.add_argument('--daemon', action='store_true', help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    mode = 'solid'
+    if args.daemon and not args.color:
+        rgb = (0, 0, 0)
+    elif args.daemon:
+        parser.error('Daemon mode takes no color argument.')
+    elif args.color == ['rainbow']:
+        mode, rgb = 'rainbow', (0, 0, 0)
+    elif len(args.color) == 1 and args.color[0] in PRESETS:
+        rgb = PRESETS[args.color[0]]
+    elif len(args.color) == 3:
+        try:
+            rgb = tuple(int(v) for v in args.color)
+        except ValueError:
+            parser.error('RGB values must be whole numbers from 0 to 255.')
+        if not all(0 <= v <= 255 for v in rgb):
+            parser.error('RGB values must be between 0 and 255.')
+    else:
+        parser.error('Use rainbow, a named color, or three RGB values.')
+    if os.geteuid() != 0:
+        parser.exit(1, 'Run with sudo to control the logo.\n')
+    if b'razer,aura' not in Path('/proc/device-tree/compatible').read_bytes().split(b'\0'):
+        parser.exit(1, 'This control is only for the Razer Phone 2 port.\n')
+    if args.daemon:
+        animate()
+        return
+    with open('/run/lock/aura-logo.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        subprocess.run(['/usr/bin/systemctl', 'stop', UNIT], check=True)
+        if mode == 'solid' and rgb == (0, 0, 0):
+            off()
+            STATE.unlink(missing_ok=True)
+            print('Logo off.')
+            return
+        validate_leds()
+        STATE.parent.mkdir(mode=0o700, exist_ok=True)
+        pending = STATE.with_suffix('.tmp')
+        pending.write_text(json.dumps({'mode': mode, 'rgb': rgb})+'\n')
+        pending.replace(STATE)
+        subprocess.run(['/usr/bin/systemctl', 'start', UNIT], check=True)
+    print('Rainbow running; pauses with screen off.' if mode == 'rainbow'
+          else f'Logo RGB: {rgb[0]} {rgb[1]} {rgb[2]}; pauses with screen off.')
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f'Logo control failed: {error}')

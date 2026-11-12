@@ -1,0 +1,70 @@
+#!/bin/sh
+# Monitor battery conditions without the old 15% bring-up boot loop.
+set -u
+
+# Pure decision path also used by the local policy regression tests.
+decide() {
+    case "$1:$2" in *[!0-9:]*|:*|*:) echo fault; return;; esac
+    if [ "$1" -lt 100 ] || [ "$1" -gt 430 ] || [ "$3" != Good ]; then
+        echo fault
+    elif [ "$5" = 1 ]; then
+        echo expired
+    elif [ "$2" -lt 3 ] && [ "$4" != 1 ]; then
+        echo critical
+    elif [ "$2" -lt 15 ]; then
+        echo low
+    else
+        echo normal
+    fi
+}
+if [ "${1:-}" = --evaluate ]; then
+    [ "$#" = 6 ] || exit 2
+    shift
+    decide "$@"
+    exit
+fi
+
+sleep 15
+duration=${AURA_TRIAL_SECONDS:-600}
+end=$(( $(cut -d. -f1 /proc/uptime) + duration ))
+previous=
+while :; do
+    temp=$(cat /sys/class/power_supply/qcom-battery/temp 2>/dev/null)
+    capacity=$(cat /sys/class/power_supply/qcom-battery/capacity 2>/dev/null)
+    health=$(cat /sys/class/power_supply/pmi8998-charger/health 2>/dev/null)
+    powered=0
+    for supply in /sys/class/power_supply/*; do
+        [ "$(cat "$supply/type" 2>/dev/null)" = Battery ] && continue
+        if [ "$(cat "$supply/online" 2>/dev/null)" = 1 ]; then powered=1; fi
+    done
+    now=$(cut -d. -f1 /proc/uptime)
+    expired=0
+    if [ "$duration" -gt 0 ] && [ "$now" -ge "$end" ]; then expired=1; fi
+    action=$(decide "$temp" "$capacity" "$health" "$powered" "$expired")
+    if [ "$action" != "$previous" ]; then
+        echo "Battery monitor: action=$action temp=$temp capacity=$capacity health=$health powered=$powered uptime=$now"
+        previous=$action
+    fi
+    # Low charge alone must neither disable charging nor reboot to Download Mode.
+    if [ "$action" = critical ]; then
+        mkdir -p /var/lib/aura
+        echo "critical: temp=$temp capacity=$capacity health=$health powered=$powered uptime=$now" >/var/lib/aura/last-battery-guard-event
+        sync
+        systemctl poweroff
+        sleep 30
+        /usr/local/libexec/busybox poweroff -f
+        exit
+    fi
+    if [ "$action" = fault ] || [ "$action" = expired ]; then
+        mkdir -p /var/lib/aura
+        echo "$action: temp=$temp capacity=$capacity health=$health powered=$powered uptime=$now" >/var/lib/aura/last-battery-guard-event
+        echo "Ending unsafe or expired trial: temp=$temp capacity=$capacity health=$health uptime=$now"
+        echo Unknown >/sys/class/power_supply/pmi8998-charger/status
+        sync
+        systemctl --reboot-argument=bootloader reboot
+        sleep 30
+        /usr/local/libexec/aura-return-to-bootloader --bootloader
+        exit
+    fi
+    sleep 5
+done

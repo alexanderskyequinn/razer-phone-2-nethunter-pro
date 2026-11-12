@@ -1,0 +1,48 @@
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -371,6 +371,7 @@
+     bool auraFocusEnabled_ = false;
+     int auraFocusMode_ = controls::AfModeContinuous;
+     int auraFocusPosition_ = 50;
++    int auraFocusLow_ = 50, auraFocusHigh_ = 800;
+     int auraFocusState_ = controls::AfStateIdle;
+     unsigned int auraWait_ = 20, auraSamples_ = 0, auraCooldown_ = 0;
+     unsigned int auraBadFrames_ = 0;
+@@ -651,8 +652,18 @@
+ 	}
+ 
+     auto *lens = sensor_->focusLens();
+-    auraFocusEnabled_ = swIsp_ && sensor_->model() == "imx363" && lens &&
++    // AURA telephoto focus bounds: retain the stock range for each lens.
++    const bool mainLens = lens && sensor_->model() == "imx363" &&
+         lens->model().find("bu64753") != std::string::npos;
++    const bool teleLens = lens && sensor_->model() == "imx351" &&
++        lens->model().find("lc898217") != std::string::npos;
++    auraFocusEnabled_ = swIsp_ && (mainLens || teleLens);
++    if (teleLens) {
++        auraFocusLow_ = 60;
++        auraFocusHigh_ = 610;
++        auraFocusPosition_ = 60;
++        auraFocus_ = AuraFocusSearch(auraFocusLow_, auraFocusHigh_);
++    }
+     if (auraFocusEnabled_) {
+         ControlInfoMap::Map map(controlInfo_.begin(), controlInfo_.end());
+         map[&controls::AfMode] = ControlInfo(controls::AfModeValues);
+@@ -1061,7 +1072,7 @@
+ 
+ bool SimpleCameraData::auraMove(int position)
+ {
+-    const int ret = sensor_->focusLens()->setFocusPosition(std::clamp(position, 50, 800));
++    const int ret = sensor_->focusLens()->setFocusPosition(std::clamp(position, auraFocusLow_, auraFocusHigh_));
+     if (ret) {
+         auraFocusState_ = controls::AfStateFailed;
+         auraPending_ = false;
+@@ -1069,7 +1080,7 @@
+         LOG(SimplePipeline, Error) << "AURA lens movement failed: " << ret;
+         return false;
+     }
+-    auraFocusPosition_ = std::clamp(position, 50, 800);
++    auraFocusPosition_ = std::clamp(position, auraFocusLow_, auraFocusHigh_);
+     auraWait_ = 8; // Existing queued frames plus mechanical settling.
+     auraSamples_ = 0;
+     auraScoreSum_ = 0;

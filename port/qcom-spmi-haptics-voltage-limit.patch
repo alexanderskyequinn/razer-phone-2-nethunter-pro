@@ -1,0 +1,35 @@
+--- a/drivers/input/misc/qcom-spmi-haptics.c
++++ b/drivers/input/misc/qcom-spmi-haptics.c
+@@ -186,6 +186,7 @@
+ 	u8 play_mode;
+ 	int magnitude;
+ 	u32 vmax;
++	u32 vmax_limit;
+ 	u32 current_limit;
+ 	u32 play_wave_rate;
+ 
+@@ -302,7 +303,7 @@
+ 	u8 val = 0;
+ 	u32 vmax_mv = haptics->vmax;
+ 
+-	vmax_mv = clamp_t(u32, vmax_mv, HAP_VMAX_MIN_MV, HAP_VMAX_MAX_MV);
++	vmax_mv = clamp_t(u32, vmax_mv, HAP_VMAX_MIN_MV, haptics->vmax_limit);
+ 
+ 	dev_dbg(haptics->dev, "Setting vmax to: %d", vmax_mv);
+ 
+@@ -817,6 +818,15 @@
+ 		goto register_fail;
+ 	}
+ 
++	/* Preserve the board motor's maximum drive voltage. */
++	haptics->vmax_limit = HAP_VMAX_MAX_MV;
++	ret = of_property_read_u32(node, "qcom,vmax-mv", &val);
++	if (!ret) {
++		if (val < HAP_VMAX_MIN_MV || val > HAP_VMAX_MAX_MV)
++			return dev_err_probe(&pdev->dev, -EINVAL, "Invalid motor voltage ceiling\n");
++		haptics->vmax_limit = val;
++	}
++
+ 	// We only support LRAs for now
+ 	haptics->actuator_type = HAP_TYPE_LRA;
+ 	ret = of_property_read_u32(node, "qcom,actuator-type", &val);

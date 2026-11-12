@@ -1,0 +1,236 @@
+diff --git a/drivers/power/supply/qcom_smbx.c b/drivers/power/supply/qcom_smbx.c
+index 2b5d20bac..1b7766221 100644
+--- a/drivers/power/supply/qcom_smbx.c
++++ b/drivers/power/supply/qcom_smbx.c
+@@ -232,6 +232,11 @@ struct smb_init_register {
+  * @usb_in_v_chan:	USB_IN voltage measurement channel
+  * @chg_psy:		Charger power supply instance
+  */
++/* Razer P9221 output feeds PMI8998 DCIN. Reporting only: no DC writes. */
++#define AURA_DCIN_RT_STS 0x410
++#define AURA_DCIN_PLUGIN BIT(4)
++#define AURA_USE_DCIN BIT(3)
++
+ struct smb_chip {
+ 	struct device *dev;
+ 	const char *name;
+@@ -248,6 +253,10 @@ struct smb_chip {
+ 	struct iio_channel *usb_in_v_chan;
+ 
+ 	struct power_supply *chg_psy;
++	struct power_supply *dc_psy;
++	struct delayed_work dc_report_work;
++	bool dc_supported;
++	int dc_last_state;
+ };
+ 
+ struct smb_match_data {
+@@ -352,17 +361,40 @@ static int smbx_ov_status(struct smb_chip *chip)
+ 	if (rc)
+ 		return rc;
+ 
+-	return !!(reg & mask);
++	return !!(val & mask);
++}
++
++static int smb_get_prop_dc_online(struct smb_chip *chip, int *val)
++{
++	unsigned int stat;
++	int rc;
++
++	*val = 0;
++	if (!chip->dc_supported)
++		return 0;
++	rc = regmap_read(chip->regmap, chip->base + POWER_PATH_STATUS(chip), &stat);
++	if (rc)
++		return rc;
++	*val = !!(stat & AURA_USE_DCIN) &&
++	       !!(stat & P_PATH_VALID_INPUT_POWER_SOURCE_STS_BIT);
++	return 0;
+ }
+ 
+ static int smb_get_prop_status(struct smb_chip *chip, int *val)
+ {
+ 	u32 stat;
+-	int usb_online = 0;
++	int usb_online = 0, dc_online = 0;
+ 	int rc;
+ 
+ 	rc = smb_get_prop_usb_online(chip, &usb_online);
++	if (rc)
++		return rc;
+ 	if (!usb_online) {
++		rc = smb_get_prop_dc_online(chip, &dc_online);
++		if (rc)
++			return rc;
++	}
++	if (!usb_online && !dc_online) {
+ 		*val = POWER_SUPPLY_STATUS_DISCHARGING;
+ 		return rc;
+ 	}
+@@ -481,7 +513,8 @@ static void smb_status_change_work(struct work_struct *work)
+ 		break;
+ 	}
+ 
+-	smb_set_current_limit(chip, current_ua);
++	smb_set_current_limit(chip, min(current_ua,
++		(unsigned int)chip->batt_info->constant_charge_current_max_ua));
+ 	power_supply_changed(chip->chg_psy);
+ }
+ 
+@@ -555,26 +588,19 @@ static int smb2_get_prop_health(struct smb_chip *chip, int *val)
+ 		return rc;
+ 	}
+ 
+-	switch (stat) {
+-	case SMB2_CHARGER_ERROR_STATUS_BAT_OV_BIT:
++	if (stat & SMB2_CHARGER_ERROR_STATUS_BAT_OV_BIT)
+ 		*val = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+-		return 0;
+-	case SMB2_BAT_TEMP_STATUS_TOO_COLD_BIT:
+-		*val = POWER_SUPPLY_HEALTH_COLD;
+-		return 0;
+-	case SMB2_BAT_TEMP_STATUS_TOO_HOT_BIT:
++	else if (stat & SMB2_BAT_TEMP_STATUS_TOO_HOT_BIT)
+ 		*val = POWER_SUPPLY_HEALTH_OVERHEAT;
+-		return 0;
+-	case SMB2_BAT_TEMP_STATUS_COLD_SOFT_LIMIT_BIT:
+-		*val = POWER_SUPPLY_HEALTH_COOL;
+-		return 0;
+-	case SMB2_BAT_TEMP_STATUS_HOT_SOFT_LIMIT_BIT:
++	else if (stat & SMB2_BAT_TEMP_STATUS_TOO_COLD_BIT)
++		*val = POWER_SUPPLY_HEALTH_COLD;
++	else if (stat & SMB2_BAT_TEMP_STATUS_HOT_SOFT_LIMIT_BIT)
+ 		*val = POWER_SUPPLY_HEALTH_WARM;
+-		return 0;
+-	default:
++	else if (stat & SMB2_BAT_TEMP_STATUS_COLD_SOFT_LIMIT_BIT)
++		*val = POWER_SUPPLY_HEALTH_COOL;
++	else
+ 		*val = POWER_SUPPLY_HEALTH_GOOD;
+-		return 0;
+-	}
++	return 0;
+ }
+ 
+ static int smb_get_prop_health(struct smb_chip *chip, int *val)
+@@ -972,6 +998,64 @@ static int smb_init_irq(struct smb_chip *chip, int *irq, const char *name,
+ 	return 0;
+ }
+ 
++static enum power_supply_property aura_dc_properties[] = {
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_ONLINE,
++};
++
++static int aura_dc_get_property(struct power_supply *psy,
++			       enum power_supply_property prop,
++			       union power_supply_propval *val)
++{
++	struct smb_chip *chip = power_supply_get_drvdata(psy);
++	unsigned int stat;
++	int rc;
++
++	switch (prop) {
++	case POWER_SUPPLY_PROP_ONLINE:
++		return smb_get_prop_dc_online(chip, &val->intval);
++	case POWER_SUPPLY_PROP_PRESENT:
++		rc = regmap_read(chip->regmap, chip->base + AURA_DCIN_RT_STS, &stat);
++		if (rc)
++			return rc;
++		val->intval = !!(stat & AURA_DCIN_PLUGIN);
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++static const struct power_supply_desc aura_dc_desc = {
++	.name = "pmi8998-wireless",
++	.type = POWER_SUPPLY_TYPE_WIRELESS,
++	.properties = aura_dc_properties,
++	.num_properties = ARRAY_SIZE(aura_dc_properties),
++	.get_property = aura_dc_get_property,
++};
++
++static void aura_dc_report_work(struct work_struct *work)
++{
++	struct smb_chip *chip = container_of(to_delayed_work(work),
++					    struct smb_chip, dc_report_work);
++	unsigned int present;
++	int online, status, state;
++
++	if (regmap_read(chip->regmap, chip->base + AURA_DCIN_RT_STS, &present) ||
++	    smb_get_prop_dc_online(chip, &online) ||
++	    smb_get_prop_status(chip, &status))
++		goto requeue;
++	state = (!!(present & AURA_DCIN_PLUGIN)) | (online << 1) | (status << 2);
++	if (state != chip->dc_last_state) {
++		chip->dc_last_state = state;
++		power_supply_changed(chip->dc_psy);
++		/* The fuel gauge caches STATUS from this existing charger supply. */
++		power_supply_changed(chip->chg_psy);
++	}
++requeue:
++	queue_delayed_work(system_freezable_wq, &chip->dc_report_work,
++			   msecs_to_jiffies(2000));
++}
++
+ static int smb_probe(struct platform_device *pdev)
+ {
+ 	struct power_supply_config supply_config = {};
+@@ -1011,6 +1095,10 @@ static int smb_probe(struct platform_device *pdev)
+ 	match_data = (const struct smb_match_data *)device_get_match_data(chip->dev);
+ 
+ 	chip->gen = match_data->gen;
++	/* This board's DC input is physically wired to its Qi receiver. */
++	chip->dc_supported = chip->gen == SMB2 &&
++			     of_machine_is_compatible("razer,aura");
++	chip->dc_last_state = -1;
+ 
+ 	dev_info(chip->dev, "Generation %s\n", chip->gen == SMB2 ? "SMB2" : "SMB5");
+ 
+@@ -1050,7 +1138,10 @@ static int smb_probe(struct platform_device *pdev)
+ 		return dev_err_probe(chip->dev, rc,
+ 				     "Failed to init status change work\n");
+ 
+-	rc = (chip->batt_info->voltage_max_design_uv - 3487500) / 7500 + 1;
++	rc = chip->batt_info->constant_charge_voltage_max_uv;
++	if (rc == -EINVAL)
++		rc = chip->batt_info->voltage_max_design_uv;
++	rc = (rc - 3487500) / 7500 + 1;
+ 	rc = regmap_update_bits(chip->regmap, chip->base + FLOAT_VOLTAGE_CFG,
+ 				FLOAT_VOLTAGE_SETTING_MASK, rc);
+ 	if (rc < 0)
+@@ -1090,7 +1181,8 @@ static int smb_probe(struct platform_device *pdev)
+ 	 * reporting.
+ 	 */
+ 	rc = regmap_write(chip->regmap, chip->base + FAST_CHARGE_CURRENT_CFG,
+-			  1950000 / CURRENT_SCALE_FACTOR);
++			  min(1950000, chip->batt_info->constant_charge_current_max_ua) /
++			  CURRENT_SCALE_FACTOR);
+ 	if (rc < 0)
+ 		return dev_err_probe(chip->dev, rc,
+ 				     "Couldn't write fast charge current cfg");
+@@ -1101,6 +1193,21 @@ static int smb_probe(struct platform_device *pdev)
+ 		return dev_err_probe(chip->dev, rc,
+ 				     "Couldn't write fast AICL rerun time");
+ 
++	if (chip->dc_supported) {
++		struct power_supply_config dc_config = { .drv_data = chip };
++
++		chip->dc_psy = devm_power_supply_register(chip->dev, &aura_dc_desc,
++							&dc_config);
++		if (IS_ERR(chip->dc_psy))
++			return dev_err_probe(chip->dev, PTR_ERR(chip->dc_psy),
++					     "Failed to register wireless input\n");
++		rc = devm_delayed_work_autocancel(chip->dev, &chip->dc_report_work,
++						  aura_dc_report_work);
++		if (rc)
++			return rc;
++		queue_delayed_work(system_freezable_wq, &chip->dc_report_work, 0);
++	}
++
+ 	/* Initialise charger state */
+ 	schedule_delayed_work(&chip->status_change_work, 0);
+ 

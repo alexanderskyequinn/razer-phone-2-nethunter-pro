@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Rear Camera Preview
+NoDisplay=true
+Comment=Live preview of the main rear camera
+Exec=/usr/local/bin/aura-camera-preview
+Icon=camera-photo
+Terminal=false
+Categories=Graphics;Photography;
+X-Purism-FormFactor=Workstation;Mobile;

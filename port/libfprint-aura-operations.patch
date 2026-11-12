@@ -1,0 +1,509 @@
+--- a/meson.build
++++ b/meson.build
+@@ -115,6 +115,7 @@
+ drivers = get_option('drivers').split(',')
+ 
+ drivers_info = {
++    'aura_fpc': { 'helper': ['udev'], 'optional': true },
+     'upektc_img': {},
+     'vfs5011': { 'endian_dependent': true },
+     'vfs7552': {},
+--- a/libfprint/meson.build
++++ b/libfprint/meson.build
+@@ -88,6 +88,7 @@
+ ]
+ 
+ driver_sources = {
++    'aura_fpc': files('drivers/aura_fpc.c'),
+     'upekts' : files(
+         'drivers/upekts.c',
+         'drivers/upek_proto.c',
+--- a/libfprint/fpi-device.h
++++ b/libfprint/fpi-device.h
+@@ -34,6 +34,7 @@
+ typedef enum {
+   FPI_DEVICE_UDEV_SUBTYPE_SPIDEV = 1 << 0,
+   FPI_DEVICE_UDEV_SUBTYPE_HIDRAW = 1 << 1,
++  FPI_DEVICE_UDEV_SUBTYPE_PLATFORM = 1 << 2,
+ } FpiDeviceUdevSubtypeFlags;
+ 
+ /**
+@@ -66,6 +67,8 @@
+     {
+       FpiDeviceUdevSubtypeFlags udev_types;
+       const gchar              *spi_acpi_id;
++      const gchar              *platform_compatible;
++      const gchar              *platform_driver;
+       struct
+       {
+         guint pid;
+--- a/libfprint/fp-device-private.h
++++ b/libfprint/fp-device-private.h
+@@ -49,6 +49,7 @@
+   {
+     gchar *spidev_path;
+     gchar *hidraw_path;
++    gchar *platform_path;
+   } udev_data;
+ 
+   gboolean        is_removed;
+--- a/libfprint/fp-device.c
++++ b/libfprint/fp-device.c
+@@ -53,6 +53,7 @@
+   PROP_FPI_USB_DEVICE,
+   PROP_FPI_UDEV_DATA_SPIDEV,
+   PROP_FPI_UDEV_DATA_HIDRAW,
++  PROP_FPI_UDEV_DATA_PLATFORM,
+   PROP_FPI_DRIVER_DATA,
+   N_PROPS
+ };
+@@ -237,6 +238,7 @@
+   g_clear_pointer (&priv->virtual_env, g_free);
+   g_clear_pointer (&priv->udev_data.spidev_path, g_free);
+   g_clear_pointer (&priv->udev_data.hidraw_path, g_free);
++  g_clear_pointer (&priv->udev_data.platform_path, g_free);
+ 
+   G_OBJECT_CLASS (fp_device_parent_class)->finalize (object);
+ }
+@@ -307,6 +309,13 @@
+         g_value_set_string (value, NULL);
+       break;
+ 
++    case PROP_FPI_UDEV_DATA_PLATFORM:
++      if (cls->type == FP_DEVICE_TYPE_UDEV)
++        g_value_set_string (value, priv->udev_data.platform_path);
++      else
++        g_value_set_string (value, NULL);
++      break;
++
+     default:
+       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+     }
+@@ -349,6 +358,13 @@
+     case PROP_FPI_UDEV_DATA_HIDRAW:
+       if (cls->type == FP_DEVICE_TYPE_UDEV)
+         priv->udev_data.hidraw_path = g_value_dup_string (value);
++      else
++        g_assert (g_value_get_string (value) == NULL);
++      break;
++
++    case PROP_FPI_UDEV_DATA_PLATFORM:
++      if (cls->type == FP_DEVICE_TYPE_UDEV)
++        priv->udev_data.platform_path = g_value_dup_string (value);
+       else
+         g_assert (g_value_get_string (value) == NULL);
+       break;
+@@ -591,6 +607,11 @@
+    *
+    * Stability: private
+    */
++  properties[PROP_FPI_UDEV_DATA_PLATFORM] =
++    g_param_spec_string ("fpi-udev-data-platform", "Udev data: platform sysfs path",
++                         "Private: Platform resource device path", NULL,
++                         G_PARAM_STATIC_STRINGS | G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY);
++
+   properties[PROP_FPI_DRIVER_DATA] =
+     g_param_spec_uint64 ("fpi-driver-data",
+                          "Driver Data",
+--- a/libfprint/fpi-device.c
++++ b/libfprint/fpi-device.c
+@@ -515,6 +515,9 @@
+ 
+   switch (subtype)
+     {
++    case FPI_DEVICE_UDEV_SUBTYPE_PLATFORM:
++      return priv->udev_data.platform_path;
++
+     case FPI_DEVICE_UDEV_SUBTYPE_HIDRAW:
+       return priv->udev_data.hidraw_path;
+ 
+--- a/libfprint/fp-context.c
++++ b/libfprint/fp-context.c
+@@ -479,6 +479,7 @@
+ 
+     g_autoptr(GList) spidev_devices = g_udev_client_query_by_subsystem (udev_client, "spidev");
+     g_autoptr(GList) hidraw_devices = g_udev_client_query_by_subsystem (udev_client, "hidraw");
++    g_autoptr(GList) platform_devices = g_udev_client_query_by_subsystem (udev_client, "platform");
+ 
+     /* for each potential driver, try to match all requested resources. */
+     for (i = 0; i < priv->drivers->len; i++)
+@@ -492,8 +493,34 @@
+ 
+         for (entry = cls->id_table; entry->udev_types; entry++)
+           {
+-            GList *matched_spidev = NULL, *matched_hidraw = NULL;
+-
++            GList *matched_spidev = NULL, *matched_hidraw = NULL, *matched_platform = NULL;
++
++            if (entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_PLATFORM)
++              {
++                /* Require an exact DT compatible and the expected bound driver.
++                 * A similarly named node or unrelated TEE device is insufficient. */
++                if (!entry->platform_compatible || !entry->platform_driver)
++                  continue;
++                for (matched_platform = platform_devices; matched_platform; matched_platform = matched_platform->next)
++                  {
++                    GUdevDevice *candidate = matched_platform->data;
++                    gint count = g_udev_device_get_property_as_int (candidate, "OF_COMPATIBLE_N");
++                    gboolean matches = FALSE;
++                    if (count <= 0 || count > 64 ||
++                        g_strcmp0 (g_udev_device_get_driver (candidate), entry->platform_driver))
++                      continue;
++                    for (gint n = 0; n < count; n++)
++                      {
++                        g_autofree gchar *key = g_strdup_printf ("OF_COMPATIBLE_%d", n);
++                        if (!g_strcmp0 (g_udev_device_get_property (candidate, key), entry->platform_compatible))
++                          { matches = TRUE; break; }
++                      }
++                    if (matches && g_udev_device_get_sysfs_path (candidate))
++                      break;
++                  }
++                if (!matched_platform)
++                  continue;
++              }
+             if (entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_SPIDEV)
+               {
+                 for (matched_spidev = spidev_devices; matched_spidev; matched_spidev = matched_spidev->next)
+@@ -539,8 +566,14 @@
+                                         "fpi-driver-data", entry->driver_data,
+                                         "fpi-udev-data-spidev", (matched_spidev ? g_udev_device_get_device_file (matched_spidev->data) : NULL),
+                                         "fpi-udev-data-hidraw", (matched_hidraw ? g_udev_device_get_device_file (matched_hidraw->data) : NULL),
++                                        "fpi-udev-data-platform", (matched_platform ? g_udev_device_get_sysfs_path (matched_platform->data) : NULL),
+                                         NULL);
+             /* remove entries from list to avoid conflicts */
++            if (matched_platform)
++              {
++                g_object_unref (matched_platform->data);
++                platform_devices = g_list_delete_link (platform_devices, matched_platform);
++              }
+             if (matched_spidev)
+               {
+                 g_object_unref (matched_spidev->data);
+@@ -557,6 +590,7 @@
+     /* free all unused elemnts in both lists */
+     g_list_foreach (spidev_devices, (GFunc) g_object_unref, NULL);
+     g_list_foreach (hidraw_devices, (GFunc) g_object_unref, NULL);
++    g_list_foreach (platform_devices, (GFunc) g_object_unref, NULL);
+   }
+ #endif
+ 
+--- a/libfprint/fprint-list-metainfo.c
++++ b/libfprint/fprint-list-metainfo.c
+@@ -87,6 +87,15 @@
+       GType driver = g_array_index (drivers, GType, i);
+       g_autoptr(FpDeviceClass) cls = g_type_class_ref (driver);
+ 
++      if (cls->type == FP_DEVICE_TYPE_UDEV)
++        {
++          for (const FpIdEntry *entry = cls->id_table; entry->udev_types; entry++)
++            if ((entry->udev_types & FPI_DEVICE_UDEV_SUBTYPE_PLATFORM) && entry->platform_compatible)
++              {
++                g_autofree gchar *compatible = g_markup_escape_text (entry->platform_compatible, -1);
++                g_string_append_printf (provided_modules, "    <modalias>of:N*T*C%s*</modalias>\n", compatible);
++              }
++        }
+       if (cls->type != FP_DEVICE_TYPE_USB)
+         continue;
+ 
+--- a/libfprint/drivers/aura_fpc.c
++++ b/libfprint/drivers/aura_fpc.c
+@@ -0,0 +1,299 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * Native platform sensor driver. Biometric decisions come only from the
++ * root-only secure-firmware bridge; this library carries opaque references.
++ */
++#include "drivers_api.h"
++#include <pwd.h>
++#include <signal.h>
++#include <unistd.h>
++
++#ifdef AURA_BRIDGE_TEST_ONLY
++#define AURA_BRIDGE_PATH "/var/tmp/aura-libfprint-operations/mock-bridge.py"
++#else
++#define AURA_BRIDGE_PATH "/opt/aura-fprint-candidate/aura_fprint_bridge.py"
++#endif
++
++typedef struct _FpiDeviceAuraFpc {
++  FpDevice parent;
++  GSubprocess *process;
++  GString *pending;
++  GPtrArray *records;
++  char *result;
++  GError *error;
++  gboolean eof, waited, cancelled;
++  guint timeout, kill_timeout, total, stages;
++} FpiDeviceAuraFpc;
++typedef struct _FpiDeviceAuraFpcClass { FpDeviceClass parent; } FpiDeviceAuraFpcClass;
++GType fpi_device_aura_fpc_get_type (void);
++G_DEFINE_TYPE (FpiDeviceAuraFpc, fpi_device_aura_fpc, FP_TYPE_DEVICE)
++
++static const FpIdEntry ids[] = {
++  { .udev_types = FPI_DEVICE_UDEV_SUBTYPE_PLATFORM,
++    .platform_compatible = "razer,aura-fpc-resources", .platform_driver = "aura-fpc-resources" },
++  { .udev_types = 0 }
++};
++
++static gboolean valid_account (guint uid, const char *name, guint finger)
++{
++  if (uid < 1000 || uid == G_MAXUINT || finger < 1 || finger > 10 || !name ||
++      !g_regex_match_simple ("^[A-Za-z_][A-Za-z0-9_.-]{0,63}$", name, 0, 0)) return FALSE;
++  struct passwd *account = getpwnam (name);
++  return account && account->pw_uid == uid;
++}
++
++static gboolean reference (FpPrint *print, guint *uid, guint *finger, char **name, char **token)
++{
++  g_autoptr(GVariant) data = NULL;
++  guint version;
++  const char *user, *id;
++  g_object_get (print, "fpi-data", &data, NULL);
++  if (!data || !g_variant_is_of_type (data, G_VARIANT_TYPE ("(uuuss)"))) return FALSE;
++  g_variant_get (data, "(uuu&s&s)", &version, uid, finger, &user, &id);
++  if (version != 1 || !valid_account (*uid, user, *finger) ||
++      g_strcmp0 (fp_print_get_username (print), user) || fp_print_get_finger (print) != *finger ||
++      !g_regex_match_simple ("^[0-9a-f]{32}$", id, 0, 0)) return FALSE;
++  *name = g_strdup (user); *token = g_strdup (id);
++  return TRUE;
++}
++
++static FpPrint *parse_record (FpDevice *device, const char *line)
++{
++  g_auto(GStrv) parts = g_strsplit (line, " ", -1);
++  if (g_strv_length (parts) != 5 || strcmp (parts[0], "RECORD") ||
++      !g_regex_match_simple ("^[1-9][0-9]{0,9}$", parts[1], 0, 0) ||
++      !g_regex_match_simple ("^([1-9]|10)$", parts[3], 0, 0) ||
++      !g_regex_match_simple ("^[0-9a-f]{32}$", parts[4], 0, 0)) return NULL;
++  guint64 wide = g_ascii_strtoull (parts[1], NULL, 10);
++  guint finger = g_ascii_strtoull (parts[3], NULL, 10);
++  if (wide >= G_MAXUINT || !valid_account (wide, parts[2], finger)) return NULL;
++  FpPrint *print = fp_print_new (device);
++  fpi_print_set_type (print, FPI_PRINT_RAW);
++  fpi_print_set_device_stored (print, TRUE);
++  fp_print_set_username (print, parts[2]);
++  fp_print_set_finger (print, finger);
++  g_object_set (print, "fpi-data", g_variant_new ("(uuuss)", 1u, (guint) wide, finger, parts[2], parts[4]), NULL);
++  return print;
++}
++
++static gboolean force_stop (gpointer data)
++{
++  FpiDeviceAuraFpc *self = data;
++  self->kill_timeout = 0;
++  if (self->process && !self->waited) g_subprocess_force_exit (self->process);
++  return G_SOURCE_REMOVE;
++}
++
++static void stop_worker (FpiDeviceAuraFpc *self)
++{
++  if (self->process && !self->waited) g_subprocess_send_signal (self->process, SIGTERM);
++  if (!self->kill_timeout) self->kill_timeout = g_timeout_add_seconds (10, force_stop, self);
++}
++
++static void protocol_error (FpiDeviceAuraFpc *self)
++{
++  if (!self->error) self->error = fpi_device_error_new (FP_DEVICE_ERROR_PROTO);
++  stop_worker (self);
++}
++
++static void finish (FpiDeviceAuraFpc *self)
++{
++  if (!self->waited || !self->eof) return;
++  FpDevice *device = FP_DEVICE (self);
++  FpiDeviceAction action = fpi_device_get_current_action (device);
++  g_autoptr(GError) error = g_steal_pointer (&self->error);
++  g_autoptr(GPtrArray) records = g_steal_pointer (&self->records);
++  g_autofree char *result = g_steal_pointer (&self->result);
++  if (self->timeout) { g_source_remove (self->timeout); self->timeout = 0; }
++  if (self->kill_timeout) { g_source_remove (self->kill_timeout); self->kill_timeout = 0; }
++  if (self->cancelled || !g_strcmp0 (result, "cancelled")) {
++    g_clear_error (&error);
++    error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "Fingerprint operation cancelled");
++  } else if (!error && (!g_subprocess_get_successful (self->process) || !result))
++    error = fpi_device_error_new (FP_DEVICE_ERROR_GENERAL);
++  if (!error && !strcmp (result, "not-enrolled")) error = fpi_device_error_new (FP_DEVICE_ERROR_DATA_NOT_FOUND);
++  if (!error && !strcmp (result, "retry")) error = fpi_device_error_new (FP_DEVICE_ERROR_BUSY);
++  if (!error && !strcmp (result, "error")) error = fpi_device_error_new (FP_DEVICE_ERROR_GENERAL);
++  g_clear_object (&self->process);
++  g_string_free (self->pending, TRUE); self->pending = NULL;
++  fpi_device_report_finger_status (device, FP_FINGER_STATUS_NONE);
++  if (!error) {
++    const char *expected = action == FPI_DEVICE_ACTION_OPEN ? "ready" :
++      action == FPI_DEVICE_ACTION_ENROLL ? "enrolled" : action == FPI_DEVICE_ACTION_LIST ? "listed" :
++      action == FPI_DEVICE_ACTION_DELETE ? "deleted" : NULL;
++    if ((expected && strcmp (result, expected)) ||
++        (action == FPI_DEVICE_ACTION_VERIFY && strcmp (result, "match") && strcmp (result, "no-match")))
++      error = fpi_device_error_new (FP_DEVICE_ERROR_PROTO);
++    if (!error && action == FPI_DEVICE_ACTION_ENROLL) {
++      FpPrint *requested;
++      fpi_device_get_enroll_data (device, &requested);
++      if (records->len != 1 ||
++          g_strcmp0 (fp_print_get_username (requested), fp_print_get_username (g_ptr_array_index (records, 0))) ||
++          fp_print_get_finger (requested) != fp_print_get_finger (g_ptr_array_index (records, 0)))
++        error = fpi_device_error_new (FP_DEVICE_ERROR_PROTO);
++    }
++  }
++  if (error) { fpi_device_action_error (device, g_steal_pointer (&error)); return; }
++  switch (action) {
++  case FPI_DEVICE_ACTION_OPEN: fpi_device_open_complete (device, NULL); break;
++  case FPI_DEVICE_ACTION_LIST: fpi_device_list_complete (device, g_steal_pointer (&records), NULL); break;
++  case FPI_DEVICE_ACTION_DELETE: fpi_device_delete_complete (device, NULL); break;
++  case FPI_DEVICE_ACTION_ENROLL:
++    fpi_device_enroll_progress (device, 20, NULL, NULL);
++    fpi_device_enroll_complete (device, g_object_ref (g_ptr_array_index (records, 0)), NULL); break;
++  case FPI_DEVICE_ACTION_VERIFY:
++    fpi_device_verify_report (device, !strcmp (result, "match") ? FPI_MATCH_SUCCESS : FPI_MATCH_FAIL, NULL, NULL);
++    fpi_device_verify_complete (device, NULL); break;
++  case FPI_DEVICE_ACTION_NONE: case FPI_DEVICE_ACTION_PROBE: case FPI_DEVICE_ACTION_CLOSE:
++  case FPI_DEVICE_ACTION_IDENTIFY: case FPI_DEVICE_ACTION_CAPTURE: case FPI_DEVICE_ACTION_CLEAR_STORAGE:
++    g_assert_not_reached ();
++  }
++}
++
++static void parse_line (FpiDeviceAuraFpc *self, const char *line)
++{
++  FpDevice *device = FP_DEVICE (self);
++  FpiDeviceAction action = fpi_device_get_current_action (device);
++  if (self->error || self->cancelled) return;
++  if (self->result) { protocol_error (self); return; }
++  if (g_str_has_prefix (line, "RESULT ")) {
++    const char *value = line + 7;
++    if (!g_regex_match_simple ("^(ready|listed|deleted|enrolled|match|no-match|not-enrolled|retry|cancelled|error)$", value, 0, 0))
++      { protocol_error (self); return; }
++    self->result = g_strdup (value); return;
++  }
++  if (g_str_has_prefix (line, "RECORD ") &&
++      (action == FPI_DEVICE_ACTION_LIST || action == FPI_DEVICE_ACTION_ENROLL)) {
++    FpPrint *print = parse_record (device, line);
++    if (!print || self->records->len >= 100) { g_clear_object (&print); protocol_error (self); return; }
++    for (guint i = 0; i < self->records->len; i++) {
++      FpPrint *other = g_ptr_array_index (self->records, i);
++      if (!g_strcmp0 (fp_print_get_username (print), fp_print_get_username (other)) &&
++          fp_print_get_finger (print) == fp_print_get_finger (other)) {
++        g_object_unref (print); protocol_error (self); return;
++      }
++    }
++    g_ptr_array_add (self->records, print); return;
++  }
++  if (!strcmp (line, "TOUCH") && (action == FPI_DEVICE_ACTION_VERIFY || action == FPI_DEVICE_ACTION_ENROLL)) {
++    fpi_device_report_finger_status (device, FP_FINGER_STATUS_NEEDED); return;
++  }
++  if (action == FPI_DEVICE_ACTION_ENROLL && g_regex_match_simple ("^SAMPLE [0-6] [0-9]{1,3}$", line, 0, 0)) {
++    guint status = line[7] - '0';
++    guint remaining = g_ascii_strtoull (line + 9, NULL, 10);
++    if (remaining > 100) { protocol_error (self); return; }
++    if (status == 1 || status == 0) {
++      guint completed = MIN (19, 20 - MIN (20, remaining));
++      if (completed > self->stages) { self->stages = completed; fpi_device_enroll_progress (device, completed, NULL, NULL); }
++    } else fpi_device_enroll_progress (device, self->stages, NULL, fpi_device_retry_new (FP_DEVICE_RETRY_GENERAL));
++    return;
++  }
++  protocol_error (self);
++}
++
++static void read_output (GObject *source, GAsyncResult *result, gpointer data)
++{
++  FpiDeviceAuraFpc *self = data;
++  g_autoptr(GError) error = NULL;
++  g_autoptr(GBytes) bytes = g_input_stream_read_bytes_finish (G_INPUT_STREAM (source), result, &error);
++  gsize length = 0;
++  const char *chunk = bytes ? g_bytes_get_data (bytes, &length) : NULL;
++  if (error || !length) {
++    self->eof = TRUE;
++    if (error || self->pending->len) protocol_error (self);
++    finish (self); g_object_unref (self); return;
++  }
++  self->total += length;
++  if (self->total > 65536 || memchr (chunk, 0, length)) protocol_error (self);
++  if (!self->error && !self->cancelled) {
++    g_string_append_len (self->pending, chunk, length);
++    char *newline;
++    while ((newline = strchr (self->pending->str, '\n'))) {
++      gsize size = newline - self->pending->str;
++      if (size > 255) { protocol_error (self); break; }
++      *newline = 0; parse_line (self, self->pending->str);
++      g_string_erase (self->pending, 0, size + 1);
++    }
++    if (self->pending->len > 255) protocol_error (self);
++  }
++  g_input_stream_read_bytes_async (G_INPUT_STREAM (source), 4096, G_PRIORITY_DEFAULT, NULL, read_output, self);
++}
++
++static void wait_done (GObject *source, GAsyncResult *result, gpointer data)
++{
++  FpiDeviceAuraFpc *self = data;
++  g_autoptr(GError) error = NULL;
++  if (!g_subprocess_wait_finish (G_SUBPROCESS (source), result, &error)) protocol_error (self);
++  self->waited = TRUE;
++  finish (self); g_object_unref (self);
++}
++
++static gboolean timed_out (gpointer data)
++{
++  FpiDeviceAuraFpc *self = data;
++  self->timeout = 0;
++  if (!self->error) self->error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "Fingerprint operation timed out");
++  stop_worker (self);
++  return G_SOURCE_REMOVE;
++}
++
++static void start (FpDevice *device, const char *operation, FpPrint *print, gboolean enrolling)
++{
++  FpiDeviceAuraFpc *self = (FpiDeviceAuraFpc *) device;
++  g_autofree char *name = NULL, *token = NULL, *uid_text = NULL, *finger_text = NULL;
++  g_autoptr(GSubprocessLauncher) launcher = NULL;
++  g_autoptr(GError) error = NULL;
++  guint uid = 0, finger = 0;
++  if (geteuid ()) { fpi_device_action_error (device, fpi_device_error_new (FP_DEVICE_ERROR_NOT_SUPPORTED)); return; }
++  if (print) {
++    if (enrolling) {
++      name = g_strdup (fp_print_get_username (print)); finger = fp_print_get_finger (print);
++      struct passwd *account = name ? getpwnam (name) : NULL;
++      if (account) uid = account->pw_uid;
++      if (!valid_account (uid, name, finger)) goto invalid;
++    } else if (!reference (print, &uid, &finger, &name, &token)) goto invalid;
++    uid_text = g_strdup_printf ("%u", uid); finger_text = g_strdup_printf ("%u", finger);
++  }
++  const char *argv[] = {"/usr/bin/python3", "-I", AURA_BRIDGE_PATH, operation,
++                        uid_text, name, finger_text, token, NULL};
++  launcher = g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
++  char path_env[] = "PATH=/usr/sbin:/usr/bin:/sbin:/bin", lang_env[] = "LANG=C.UTF-8";
++  char *environment[] = {path_env, lang_env, NULL};
++  g_subprocess_launcher_set_environ (launcher, environment);
++  self->process = g_subprocess_launcher_spawnv (launcher, argv, &error);
++  if (!self->process) { fpi_device_action_error (device, g_steal_pointer (&error)); return; }
++  self->pending = g_string_new (NULL); self->records = g_ptr_array_new_with_free_func (g_object_unref);
++  self->eof = self->waited = self->cancelled = FALSE; self->total = self->stages = 0;
++  self->timeout = g_timeout_add_seconds (enrolling ? 340 : 85, timed_out, self);
++  g_input_stream_read_bytes_async (g_subprocess_get_stdout_pipe (self->process), 4096, G_PRIORITY_DEFAULT, NULL, read_output, g_object_ref (self));
++  g_subprocess_wait_async (self->process, NULL, wait_done, g_object_ref (self));
++  return;
++invalid:
++  fpi_device_action_error (device, fpi_device_error_new (FP_DEVICE_ERROR_DATA_INVALID));
++}
++
++static void probe (FpDevice *device)
++{
++  const char *path = fpi_device_get_udev_data (device, FPI_DEVICE_UDEV_SUBTYPE_PLATFORM);
++  if (!path || !g_path_is_absolute (path)) {
++    fpi_device_probe_complete (device, NULL, NULL, fpi_device_error_new (FP_DEVICE_ERROR_NOT_SUPPORTED)); return;
++  }
++  fpi_device_probe_complete (device, "aura-fpc-qsee-v1", "Razer Phone 2 fingerprint sensor", NULL);
++}
++static void open_device (FpDevice *device) { start (device, "ready", NULL, FALSE); }
++static void close_device (FpDevice *device) { fpi_device_close_complete (device, NULL); }
++static void list_prints (FpDevice *device) { start (device, "list", NULL, FALSE); }
++static void enroll (FpDevice *device) { FpPrint *print; fpi_device_get_enroll_data (device, &print); start (device, "enroll", print, TRUE); }
++static void verify (FpDevice *device) { FpPrint *print; fpi_device_get_verify_data (device, &print); start (device, "verify", print, FALSE); }
++static void delete_print (FpDevice *device) { FpPrint *print; fpi_device_get_delete_data (device, &print); start (device, "delete", print, FALSE); }
++static void cancel (FpDevice *device) { FpiDeviceAuraFpc *self = (FpiDeviceAuraFpc *) device; self->cancelled = TRUE; stop_worker (self); }
++static void fpi_device_aura_fpc_init (FpiDeviceAuraFpc *self) { (void) self; }
++static void fpi_device_aura_fpc_class_init (FpiDeviceAuraFpcClass *klass)
++{
++  FpDeviceClass *device = FP_DEVICE_CLASS (klass);
++  device->id = "aura_fpc"; device->full_name = "Razer Phone 2 Qualcomm TEE fingerprint sensor";
++  device->type = FP_DEVICE_TYPE_UDEV; device->id_table = ids; device->scan_type = FP_SCAN_TYPE_PRESS;
++  device->nr_enroll_stages = 20;
++  device->probe = probe; device->open = open_device; device->close = close_device;
++  device->enroll = enroll; device->verify = verify; device->list = list_prints; device->delete = delete_print; device->cancel = cancel;
++  fpi_device_class_auto_initialize_features (device);
++}
